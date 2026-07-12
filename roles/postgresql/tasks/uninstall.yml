@@ -1,0 +1,25 @@
+---
+- name: Stop and disable PostgreSQL service
+  ansible.builtin.systemd:
+    name: postgresql
+    state: stopped
+    enabled: no
+  ignore_errors: yes
+
+- name: Purge PostgreSQL 18 packages
+  ansible.builtin.apt:
+    name:
+      - "postgresql-{{ postgresql_version }}"
+      - "postgresql-client-{{ postgresql_version }}"
+      - python3-psycopg2
+    state: absent
+    purge: yes
+
+- name: Clean up PostgreSQL configuration directories
+  ansible.builtin.file:
+    path: /etc/postgresql
+    state: absent
+
+- name: Clean up PostgreSQL data contents
+  ansible.builtin.shell: "rm -rf /var/lib/postgresql/{{ postgresql_version }}/main/*"
+  ignore_errors: yes

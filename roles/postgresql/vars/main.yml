@@ -1,0 +1,3 @@
+---
+# Internal variables for postgresql role
+# Variables defined here have high priority and should not be overridden in normal playbooks.

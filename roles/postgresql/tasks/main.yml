@@ -1,0 +1,16 @@
+---
+- name: Handle PostgreSQL uninstallation (state is absent)
+  ansible.builtin.import_tasks: uninstall.yml
+  when: (postgresql_package_state | default('present')) == 'absent'
+
+- name: Handle PostgreSQL installation (state is present)
+  block:
+    - name: Setup repository
+      ansible.builtin.import_tasks: repo.yml
+    - name: Install packages
+      ansible.builtin.import_tasks: install.yml
+    - name: Configure database
+      ansible.builtin.import_tasks: config.yml
+    - name: Setup services and databases
+      ansible.builtin.import_tasks: service.yml
+  when: (postgresql_package_state | default('present')) == 'present'

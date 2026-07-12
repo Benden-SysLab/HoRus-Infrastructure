@@ -1,0 +1,68 @@
+---
+# Default variables for postgresql role
+# These values are designed for Debian 13 (Trixie) and PostgreSQL 18.
+
+postgresql_version: 18
+
+# Package names
+postgresql_packages:
+  - "postgresql-{{ postgresql_version }}"
+  - "postgresql-client-{{ postgresql_version }}"
+
+# Python packages required by Ansible postgresql modules
+postgresql_python_packages:
+  - python3-psycopg2
+
+# Directories
+postgresql_conf_dir: "/etc/postgresql/{{ postgresql_version }}/main"
+postgresql_data_dir: "/var/lib/postgresql/{{ postgresql_version }}/main"
+
+# Service configuration
+postgresql_service_name: "postgresql"
+postgresql_service_state: "started"
+postgresql_service_enabled: true
+
+# PostgreSQL Server Settings (postgresql.conf)
+# Using a key-value dictionary to easily allow overriding parameters.
+postgresql_settings:
+  listen_addresses: '*'
+  port: 5432
+  max_connections: 100
+  shared_buffers: '128MB'
+  work_mem: '4MB'
+  maintenance_work_mem: '64MB'
+  effective_cache_size: '384MB'
+  wal_level: 'replica'
+  max_wal_size: '1GB'
+  min_wal_size: '80MB'
+  checkpoint_completion_target: 0.9
+  checkpoint_timeout: '5min'
+  password_encryption: 'scram-sha-256'
+
+postgresql_package_state: "present"
+postgresql_listen_addresses: "*"
+postgresql_auth_method: "scram-sha-256"
+postgresql_allowed_subnet: "0.0.0.0/0"
+
+db_gitea_user: "gitea"
+db_gitea_password: "gitea_password_change_me"
+db_gitea_name: "gitea"
+
+db_authentik_user: "authentik"
+db_authentik_password: "authentik_password_change_me"
+db_authentik_name: "authentik"
+
+# PostgreSQL Access Rules (pg_hba.conf)
+postgresql_pg_hba_rules:
+  # IPv4 Local loopback
+  - { type: local, database: all, user: postgres, method: peer }
+  - { type: local, database: all, user: all, method: peer }
+  - { type: host, database: all, user: all, address: '127.0.0.1/32', method: scram-sha-256 }
+  # IPv6 Local loopback
+  - { type: host, database: all, user: all, address: '::1/128', method: scram-sha-256 }
+  # Internal subnet / client networks (adjust this in production to restrict access)
+  - { type: host, database: all, user: all, address: '0.0.0.0/0', method: scram-sha-256 }
+
+# Repository configuration
+postgresql_repo_keyring: "/etc/apt/keyrings/pgdg.asc"
+postgresql_repo_file: "/etc/apt/sources.list.d/pgdg.list"

@@ -1,5 +1,9 @@
 # HoRus-Infrastructure
 
+<p align="center">
+  <img src="assets/logo.png" alt="HoRus Logo" width="180"/>
+</p>
+
 ![Ansible](https://img.shields.io/badge/Ansible-2.19.4-black?style=flat-square&logo=ansible)
 ![Debian](https://img.shields.io/badge/Debian-13_(Trixie)-D70A53?style=flat-square&logo=debian)
 ![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=flat-square)
@@ -8,7 +12,9 @@ Production-grade Infrastructure-as-Code platform for preparing Debian-based syst
 
 ## Project Overview
 
-HoRus-Infrastructure is responsible for preparing freshly installed Debian 13 (Trixie) systems. This is the **Stage 1** of the HoRus ecosystem, focusing on OS bootstrap and security hardening.
+HoRus-Infrastructure is responsible for preparing freshly installed Debian 13 (Trixie) systems. This project encompasses:
+- **Stage 1**: Operating System Bootstrap & Security Hardening (`common` role).
+- **Stage 2**: Production-ready PostgreSQL 18 Database Server Deployment (`postgresql` role).
 
 ## Directory Structure
 
@@ -18,16 +24,23 @@ HoRus-Infrastructure/
 ├── requirements.yml      # External collections
 ├── inventory/            # Host inventory and variables
 │   ├── syslab_hosts.yml  # Source of truth for hosts
-│   └── group_vars/       # Global and secret variables
+│   └── group_vars/       # Group and secret variables
+│       ├── all.yml        # Global parameters
+│       └── postgresql.yml # PostgreSQL server parameters
 ├── bootstrap/            # Pre-deployment assets
 │   ├── ssh/              # Management scripts for SSH keys
 │   └── certs/            # Placeholder for PKI assets
 ├── playbooks/            # Deployment entry points
+│   ├── common.yml        # Stage 1 OS bootstrap entry point
+│   └── postgresql.yml    # Stage 2 PostgreSQL server entry point
 └── roles/                # Modular infrastructure logic
     ├── common/           # OS bootstrap and hardening
     ├── download/         # Reusable download abstraction
-    └── tests/            # Stage 1 validation suite
+    ├── molecule_prepare/ # Bootstrap environment for tests
+    ├── postgresql/       # PostgreSQL 18 server deployment
+    └── tests/            # System validation suite
 ```
+
 
 ## Quick Start
 
@@ -53,12 +66,18 @@ HoRus-Infrastructure/
 ## Useful Commands
 
 - **Ping all hosts**: `ansible all -m ping`
-- **Check mode**: `ansible-playbook playbooks/common.yml --check`
+- **Check mode (Dry run)**: `ansible-playbook playbooks/common.yml --check`
 - **Limit execution to a specific host**: `ansible-playbook -i inventory/syslab_hosts.yml playbooks/common.yml --limit horus-db-srv01`
-- **Run individual playbook**:
+- **Run all bootstrap playbooks**:
   ```bash
   ansible-playbook -i inventory/syslab_hosts.yml playbooks/common.yml
+  ansible-playbook -i inventory/syslab_hosts.yml playbooks/postgresql.yml
   ```
+- **Run individual playbook (PostgreSQL)**:
+  ```bash
+  ansible-playbook -i inventory/syslab_hosts.yml playbooks/postgresql.yml
+  ```
+
 
 ## Quality Assurance & Testing
 
@@ -118,9 +137,11 @@ The project is designed to support event-driven execution:
 
 ## Roadmap
 
-- [x] **Stage 1**: Common Operating System Bootstrap.
-- [ ] **Stage 2**: Network and Storage Infrastructure.
-- [ ] **Stage 3**: HoRus Control Plane deployment.
+- [x] **Stage 1**: Common Operating System Bootstrap & Hardening.
+- [x] **Stage 2**: PostgreSQL 18 Production-ready Database Server Deployment.
+- [ ] **Stage 3**: Network and Storage Infrastructure.
+- [ ] **Stage 4**: HoRus Control Plane deployment.
+
 
 ## Engineering Standards
 

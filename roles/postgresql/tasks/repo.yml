@@ -1,0 +1,36 @@
+---
+- name: Install gnupg and curl if missing
+  ansible.builtin.apt:
+    name:
+      - gnupg
+      - curl
+      - python3-psycopg2
+      - sudo
+    state: present
+
+- name: Create apt keyrings directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Remove old PostgreSQL repository definition files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/pgdg.list
+    - /etc/apt/sources.list.d/postgresql.list
+
+- name: Install PostgreSQL repository key
+  ansible.builtin.get_url:
+    url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+    dest: "{{ postgresql_repo_keyring }}"
+    mode: '0644'
+
+- name: Configure PostgreSQL repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by={{ postgresql_repo_keyring }}] http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+    filename: pgdg
+    state: present
+    update_cache: yes

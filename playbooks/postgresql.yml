@@ -1,0 +1,9 @@
+---
+- name: "Stage 2 — PostgreSQL Database Server Provisioning"
+  hosts: postgresql
+  become: true
+  gather_facts: true
+  vars_files:
+    - "{{ playbook_dir }}/../inventory/group_vars/vault_inventory.yml"
+  roles:
+    - postgresql

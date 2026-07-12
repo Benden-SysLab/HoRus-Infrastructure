@@ -1,0 +1,22 @@
+---
+- name: Ensure postgresql-common config directory exists
+  ansible.builtin.file:
+    path: /etc/postgresql-common
+    state: directory
+    mode: '0755'
+
+- name: Disable default PostgreSQL cluster creation to prevent failure on nested mounts
+  ansible.builtin.lineinfile:
+    path: /etc/postgresql-common/createcluster.conf
+    line: "create_main_cluster = false"
+    create: yes
+    mode: '0644'
+
+- name: Install PostgreSQL 18 packages and rsync
+  ansible.builtin.apt:
+    name:
+      - "postgresql-{{ postgresql_version }}"
+      - "postgresql-client-{{ postgresql_version }}"
+      - rsync
+    state: present
+    update_cache: yes

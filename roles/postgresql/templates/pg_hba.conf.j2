@@ -1,0 +1,14 @@
+# PostgreSQL Client Authentication Configuration File
+# Managed by Ansible (HoRus-Infrastructure)
+# Any manual modifications will be overwritten.
+
+# Rules for connecting to the server.
+# Format: TYPE  DATABASE  USER  ADDRESS  METHOD
+
+# ==============================================================================
+# Connection Type Configuration Rules
+# ==============================================================================
+
+{% for rule in postgresql_pg_hba_rules %}
+{{ rule.type }}    {{ rule.database }}    {{ rule.user }}    {{ rule.address | default('') }}    {{ rule.method }}
+{% endfor %}

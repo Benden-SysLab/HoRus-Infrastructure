@@ -1,0 +1,32 @@
+---
+# Host group variables for PostgreSQL server
+# These variables configure the postgresql role when applied to the 'postgresql' group or specific hosts.
+
+postgresql_version: 18
+
+# Customized database engine settings for production environment
+postgresql_settings:
+  listen_addresses: '*'
+  port: 5432
+  max_connections: 150
+  shared_buffers: '512MB'
+  work_mem: '16MB'
+  maintenance_work_mem: '128MB'
+  effective_cache_size: '1536MB'
+  wal_level: 'replica'
+  max_wal_size: '2GB'
+  min_wal_size: '128MB'
+  checkpoint_completion_target: 0.9
+  checkpoint_timeout: '15min'
+  password_encryption: 'scram-sha-256'
+
+# IP authentication rules (pg_hba.conf)
+postgresql_pg_hba_rules:
+  # IPv4 Local loopback
+  - { type: local, database: all, user: postgres, method: peer }
+  - { type: local, database: all, user: all, method: peer }
+  - { type: host, database: all, user: all, address: '127.0.0.1/32', method: scram-sha-256 }
+  # IPv6 Local loopback
+  - { type: host, database: all, user: all, address: '::1/128', method: scram-sha-256 }
+  # Internal subnet/container networks (allows services like Gitea, Authentik, etc. to connect)
+  - { type: host, database: all, user: all, address: '0.0.0.0/0', method: scram-sha-256 }

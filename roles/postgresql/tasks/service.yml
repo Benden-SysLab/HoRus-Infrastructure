@@ -1,0 +1,69 @@
+---
+- name: Reload systemd to pick up new postgresql cluster
+  ansible.builtin.systemd:
+    daemon_reload: yes
+
+- name: Ensure PostgreSQL cluster service is enabled and started
+  ansible.builtin.systemd:
+    name: "postgresql@{{ postgresql_version }}-main"
+    state: started
+    enabled: yes
+
+- name: Configure listen_addresses in postgresql.conf
+  ansible.builtin.lineinfile:
+    path: "/etc/postgresql/{{ postgresql_version }}/main/postgresql.conf"
+    regexp: "^#?listen_addresses\\s*="
+    line: "listen_addresses = '{{ postgresql_listen_addresses }}'"
+  register: pg_conf_updated
+
+- name: Configure client authentication in pg_hba.conf
+  ansible.builtin.blockinfile:
+    path: "/etc/postgresql/{{ postgresql_version }}/main/pg_hba.conf"
+    marker: "# {mark} ANSIBLE MANAGED HORUS DB CLUSTER AUTH"
+    block: |
+      host    all             all             127.0.0.1/32            {{ postgresql_auth_method }}
+      host    all             all             ::1/128                 {{ postgresql_auth_method }}
+      host    all             all             {{ postgresql_allowed_subnet }}      {{ postgresql_auth_method }}
+  register: pg_hba_updated
+
+- name: Restart PostgreSQL to apply configuration changes
+  ansible.builtin.systemd:
+    name: "postgresql@{{ postgresql_version }}-main"
+    state: restarted
+  when: pg_conf_updated.changed or pg_hba_updated.changed
+
+- name: Wait for PostgreSQL socket to be ready
+  ansible.builtin.wait_for:
+    path: /var/run/postgresql/.s.PGSQL.5432
+    state: present
+    timeout: 30
+
+- name: Create database user for Gitea
+  community.postgresql.postgresql_user:
+    name: "{{ db_gitea_user }}"
+    password: "{{ db_gitea_password }}"
+    role_attr_flags: NOSUPERUSER,NOCREATEDB
+  become: true
+  become_user: postgres
+
+- name: Create database for Gitea
+  community.postgresql.postgresql_db:
+    name: "{{ db_gitea_name }}"
+    owner: "{{ db_gitea_user }}"
+  become: true
+  become_user: postgres
+
+- name: Create database user for Authentik
+  community.postgresql.postgresql_user:
+    name: "{{ db_authentik_user }}"
+    password: "{{ db_authentik_password }}"
+    role_attr_flags: NOSUPERUSER,NOCREATEDB
+  become: true
+  become_user: postgres
+
+- name: Create database for Authentik
+  community.postgresql.postgresql_db:
+    name: "{{ db_authentik_name }}"
+    owner: "{{ db_authentik_user }}"
+  become: true
+  become_user: postgres

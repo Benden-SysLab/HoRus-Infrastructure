@@ -30,3 +30,7 @@
     - name: Include role common
       ansible.builtin.include_role:
         name: common
+
+    - name: Include role postgresql
+      ansible.builtin.include_role:
+        name: postgresql
