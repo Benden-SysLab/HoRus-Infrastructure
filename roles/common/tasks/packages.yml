@@ -1,0 +1,17 @@
+---
+- name: Load categorized package definitions
+  ansible.builtin.include_vars:
+    dir: "packages"
+
+- name: Install base, monitoring, network, debug, security, and python packages on standard hosts
+  ansible.builtin.apt:
+    name: "{{ base_packages + monitoring_packages + network_packages + debug_packages + security_packages + python_packages }}"
+    state: present
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Install btop on Proxmox hosts
+  ansible.builtin.apt:
+    name: btop
+    state: present
+  when: node_class | default('vm') == 'proxmox'
+

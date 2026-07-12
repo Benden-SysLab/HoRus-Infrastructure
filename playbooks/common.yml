@@ -1,0 +1,21 @@
+---
+- name: "Pre-run Prep: Generate SSH keys and Hashed passwords if missing"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Run pre-flight preparation script
+      ansible.builtin.command: python3 "{{ playbook_dir }}/../bootstrap/auto_prepare.py"
+      register: _prep_result
+      changed_when: "'updated' in _prep_result.stdout or 'Generated' in _prep_result.stdout"
+
+- name: "Stage 1 — Common Operating System Bootstrap"
+  hosts: all
+  become: true
+  gather_facts: true
+  vars_files:
+    - "{{ playbook_dir }}/../inventory/group_vars/vault_inventory.yml"
+  roles:
+    - common
+    - tests
+

@@ -1,0 +1,9 @@
+---
+profile: min
+exclude_paths:
+  - .cache/
+  - .git/
+  - .github/
+  - node_modules/
+  - bootstrap/
+  - molecule/

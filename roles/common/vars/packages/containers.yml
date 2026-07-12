@@ -1,0 +1,6 @@
+---
+container_packages:
+  - podman
+  - podman-compose
+  - buildah
+  - skopeo

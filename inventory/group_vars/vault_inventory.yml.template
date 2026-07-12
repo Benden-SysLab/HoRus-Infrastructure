@@ -1,0 +1,27 @@
+---
+# Vault Inventory Template (Copy to vault_inventory.yml)
+
+# Admin Configuration
+vault_admin_username: "root"
+vault_admin_password: "REPLACE_WITH_SHA512_CRYPT_HASH"
+vault_admin_plaintext_password: "REPLACE_WITH_PLAINTEXT_SUDO_PASSWORD"
+vault_admin_ssh_pub_key: "bootstrap/ssh/id_ed25519_root.pub"
+vault_admin_ssh_priv_key: "bootstrap/ssh/id_ed25519_root"
+
+# Jenkins Configuration
+vault_jenkins_username: "jenkins-srv"
+vault_jenkins_password: "REPLACE_WITH_SHA512_CRYPT_HASH"
+vault_jenkins_plaintext_password: "REPLACE_WITH_PLAINTEXT_PASSWORD"
+vault_jenkins_ssh_pub_key: "bootstrap/ssh/id_ed25519_jenkins.pub"
+vault_jenkins_ssh_priv_key: "bootstrap/ssh/id_ed25519_jenkins"
+
+# Network & Proxy Configuration
+vault_network:
+  proxy:
+    mode: "forced" # Options: forced, enabled, disabled
+    type: "http"   # Options: http, https
+    host: "46.183.30.140"
+    port: "6071"
+    username: ""
+    password: ""
+    no_proxy: "localhost,127.0.0.1,.benden-syslab.com"

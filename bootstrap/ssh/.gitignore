@@ -1,0 +1,5 @@
+# Ignore all private and public keys
+*
+!.gitignore
+!README.md
+!generate_ssh_keys.sh

@@ -1,0 +1,10 @@
+---
+network_packages:
+  - curl
+  - wget
+  - net-tools
+  - bind9-dnsutils
+  - tcpdump
+  - nmap
+  - socat
+  - traceroute

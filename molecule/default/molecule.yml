@@ -1,0 +1,19 @@
+---
+dependency:
+  name: galaxy
+driver:
+  name: podman
+platforms:
+  - name: horus-debian13-test
+    image: docker.io/library/debian:13-slim
+    pre_build_image: true
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      interpreter_python: auto_silent
+      roles_path: ../../roles
+  playbooks:
+    converge: converge.yml
+verifier:
+  name: ansible

@@ -1,0 +1,14 @@
+---
+base_packages:
+  - sudo
+  - vim
+  - nano
+  - git
+  - chrony
+  - zip
+  - unzip
+  - tar
+  - rsync
+  - acl
+  - bash-completion
+  - lsb-release

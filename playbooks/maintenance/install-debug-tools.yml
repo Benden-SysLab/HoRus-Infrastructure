@@ -1,0 +1,15 @@
+---
+- name: "Operational: Install Debug Tools"
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Load debug package definitions
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../roles/common/vars/packages/debug.yml"
+
+    - name: Install debug packages on standard hosts
+      ansible.builtin.apt:
+        name: "{{ debug_packages }}"
+        state: present
+      when: node_class | default('vm') != 'proxmox'

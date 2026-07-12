@@ -1,0 +1,194 @@
+---
+all:
+  children:
+    gateway:
+      hosts:
+        horus-gw-srv01:
+          ansible_host: 192.168.1.200
+          host_type: physical
+          node_class: gateway
+          system_role: gateway
+          ansible_user: abbenden-srv
+          ansible_ssh_private_key_file: "{{ playbook_dir }}/../{{ ssh.admin_private_key_path }}"
+          ansible_become_password: "{{ vault_admin_plaintext_password }}"
+    jenkins_master:
+      hosts:
+        horus-jnk-srv01:
+          ansible_host: 192.168.1.212
+          host_type: vm
+          node_class: vm
+          system_role: jenkins
+    jenkins_agents:
+      hosts:
+        horus-agent-srv01:
+          ansible_host: 192.168.1.217
+          host_type: lxc
+          node_class: lxc
+          system_role: jenkins_agent
+    authentik:
+      hosts:
+        horus-iam-srv01:
+          ansible_host: 192.168.1.222
+          host_type: lxc
+          node_class: lxc
+          system_role: authentik
+    gitea:
+      hosts:
+        horus-git-srv01:
+          ansible_host: 192.168.1.223
+          host_type: lxc
+          node_class: lxc
+          system_role: gitea
+    vault:
+      hosts:
+        horus-vlt-srv01:
+          ansible_host: 192.168.1.224
+          host_type: vm
+          node_class: vm
+          system_role: vault
+    postgresql:
+      hosts:
+        horus-db-srv01:
+          ansible_host: 192.168.1.226
+          host_type: lxc
+          node_class: lxc
+          system_role: database
+    harbor:
+      hosts:
+        horus-reg-srv01:
+          ansible_host: 192.168.1.227
+          host_type: lxc
+          node_class: lxc
+          system_role: harbor
+    ansible_node:
+      hosts:
+        horus-ans-srv01:
+          ansible_host: 192.168.1.228
+          host_type: lxc
+          node_class: lxc
+          system_role: ansible
+    guardian:
+      hosts:
+        horus-gg-srv01:
+          ansible_host: 192.168.1.218
+          host_type: lxc
+          node_class: lxc
+          system_role: guardian
+    ai_internet_deploy:
+      hosts:
+        horus-ai-srv01:
+          ansible_host: 192.168.1.213
+          host_type: lxc
+          node_class: lxc
+          system_role: ai
+    ai_vision:
+      hosts:
+        horus-ai-srv02:
+          ansible_host: 192.168.1.214
+          host_type: lxc
+          node_class: lxc
+          system_role: ai
+    ai_experimental:
+      hosts:
+        horus-ai-srv03:
+          ansible_host: 192.168.1.229
+          host_type: lxc
+          node_class: lxc
+          system_role: ai
+    ai_monitoring_repairing:
+      hosts:
+        horus-ai-srv04:
+          ansible_host: 192.168.1.237
+          host_type: lxc
+          node_class: lxc
+          system_role: ai
+    casaos:
+      hosts:
+        horus-media-srv01:
+          ansible_host: 192.168.1.215
+          host_type: lxc
+          node_class: lxc
+          system_role: media
+    joyfilm:
+      hosts:
+        horus-media-srv02:
+          ansible_host: 192.168.1.216
+          host_type: lxc
+          node_class: lxc
+          system_role: media
+    wiki:
+      hosts:
+        horus-wiki-srv01:
+          ansible_host: 192.168.1.225
+          host_type: lxc
+          node_class: lxc
+          system_role: wiki
+    grafana:
+      hosts:
+        horus-grf-srv01:
+          ansible_host: 192.168.1.232
+          host_type: lxc
+          node_class: lxc
+          system_role: monitoring
+    prometheus:
+      hosts:
+        horus-pm-srv01:
+          ansible_host: 192.168.1.233
+          host_type: lxc
+          node_class: lxc
+          system_role: monitoring
+    loki:
+      hosts:
+        horus-lok-srv01:
+          ansible_host: 192.168.1.234
+          host_type: lxc
+          node_class: lxc
+          system_role: monitoring
+    otel:
+      hosts:
+        horus-otel-srv01:
+          ansible_host: 192.168.1.235
+          host_type: lxc
+          node_class: lxc
+          system_role: monitoring
+    s3_storage:
+      hosts:
+        horus-s3-srv01:
+          ansible_host: 192.168.1.236
+          host_type: lxc
+          node_class: lxc
+          system_role: storage
+    proxmox:
+      hosts:
+        horus-pmx-srv01:
+          ansible_host: 192.168.1.212
+          host_type: physical
+          node_class: proxmox
+          system_role: hypervisor
+        horus-pmx-srv02:
+          ansible_host: 192.168.1.221
+          host_type: physical
+          node_class: proxmox
+          system_role: hypervisor
+        horus-pmx-srv03:
+          ansible_host: 192.168.1.231
+          host_type: physical
+          node_class: proxmox
+          system_role: hypervisor
+    proxmax:
+      hosts:
+        horus-pmx-srv01:
+          ansible_host: 192.168.1.212
+          host_type: physical
+          node_class: proxmox
+          system_role: hypervisor
+        horus-pmx-srv02:
+          ansible_host: 192.168.1.221
+          host_type: physical
+          node_class: proxmox
+          system_role: hypervisor
+        horus-pmx-srv03:
+          ansible_host: 192.168.1.231
+          host_type: physical
+          node_class: proxmox
+          system_role: hypervisor

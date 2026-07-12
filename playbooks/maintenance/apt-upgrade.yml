@@ -1,0 +1,10 @@
+---
+- name: "Operational: Perform APT Safe Upgrade"
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Perform safe upgrade
+      ansible.builtin.apt:
+        upgrade: safe
+      when: node_class | default('vm') != 'proxmox'

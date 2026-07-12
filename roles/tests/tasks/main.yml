@@ -1,0 +1,80 @@
+---
+# roles/tests/tasks/main.yml
+- name: Load package definitions for verification
+  ansible.builtin.include_vars:
+    dir: "{{ role_path }}/../common/vars/packages"
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Verify installed packages
+  ansible.builtin.package_facts:
+    manager: auto
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Check required packages exist
+  ansible.builtin.assert:
+    that:
+      - "'{{ item }}' in ansible_facts.packages"
+    fail_msg: "Package {{ item }} is missing"
+  loop: "{{ base_packages + monitoring_packages + network_packages + debug_packages + security_packages + python_packages }}"
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Verify users exist
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ item }}"
+  loop:
+    - "{{ users.admin.username }}"
+    - "{{ users.jenkins.username }}"
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Verify SSH configuration - PermitRootLogin
+  ansible.builtin.command: grep "^PermitRootLogin {{ ssh_config.permit_root_login }}" /etc/ssh/sshd_config
+  register: _ssh_root_check
+  changed_when: false
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Verify SSH configuration - PasswordAuthentication
+  ansible.builtin.command: grep "^PasswordAuthentication {{ ssh_config.password_authentication }}" /etc/ssh/sshd_config
+  register: _ssh_pwd_check
+  changed_when: false
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Verify directory structure
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: _dir_stats
+  loop: "{{ infra_base_dirs }}"
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Assert directory structure
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isdir
+  loop: "{{ _dir_stats.results }}"
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Verify Chrony service status
+  ansible.builtin.systemd:
+    name: chrony
+  register: _chrony_status
+  when: host_type | default('vm') != 'lxc'
+
+- name: Assert Chrony is running
+  ansible.builtin.assert:
+    that:
+      - _chrony_status.status.ActiveState == 'active'
+  when: host_type | default('vm') != 'lxc'
+
+- name: Verify Python version
+  ansible.builtin.command: python3 --version
+  register: _python_version
+  changed_when: false
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Assert Python version is correct
+  ansible.builtin.assert:
+    that:
+      - "'3.13' in _python_version.stdout"
+  when: node_class | default('vm') != 'proxmox'
+

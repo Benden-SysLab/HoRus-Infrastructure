@@ -1,0 +1,19 @@
+---
+- name: APT configuration and update
+  ansible.builtin.import_tasks: apt.yml
+
+- name: Package installation
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Locale and Timezone setup
+  ansible.builtin.import_tasks: locale.yml
+
+- name: Chrony Time Synchronization
+  ansible.builtin.import_tasks: chrony.yml
+
+- name: Users and Sudo privileges
+  ansible.builtin.import_tasks: users.yml
+
+- name: SSH Key provisioning and hardening
+  ansible.builtin.import_tasks: ssh.yml
+

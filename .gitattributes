@@ -1,0 +1,32 @@
+# Default
+* text=auto eol=lf
+
+# Shell
+*.sh text eol=lf
+
+# Python
+*.py text eol=lf
+
+# YAML
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Markdown
+*.md text eol=lf
+
+# Terraform
+*.tf text eol=lf
+*.tfvars text eol=lf
+
+# Ansible
+ansible.cfg text eol=lf
+
+# Windows scripts
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary

@@ -1,0 +1,32 @@
+---
+- name: Converge
+  hosts: all
+  gather_facts: false
+  vars:
+    # Minimal mock variables for testing role 'common' inside the Molecule container
+    vault_admin_username: "test-admin"
+    vault_admin_password: "$6$rounds=656000$test$hashedpasswordhere"
+    vault_admin_plaintext_password: "test-admin-password"
+    vault_admin_ssh_pub_key: "bootstrap/ssh/id_ed25519_abbenden.pub"
+    vault_admin_ssh_priv_key: "bootstrap/ssh/id_ed25519_abbenden"
+    
+    vault_jenkins_username: "test-jenkins"
+    vault_jenkins_password: "$6$rounds=656000$test$hashedpasswordhere"
+    vault_jenkins_plaintext_password: "test-jenkins-password"
+    vault_jenkins_ssh_pub_key: "bootstrap/ssh/id_ed25519_jenkins.pub"
+    vault_jenkins_ssh_priv_key: "bootstrap/ssh/id_ed25519_jenkins"
+
+    ssh:
+      admin_private_key_path: "bootstrap/ssh/id_ed25519_abbenden"
+      jenkins_private_key_path: "bootstrap/ssh/id_ed25519_jenkins"
+  tasks:
+    - name: Include role molecule_prepare to bootstrap container
+      ansible.builtin.include_role:
+        name: molecule_prepare
+
+    - name: Gather facts after bootstrap
+      ansible.builtin.setup:
+
+    - name: Include role common
+      ansible.builtin.include_role:
+        name: common

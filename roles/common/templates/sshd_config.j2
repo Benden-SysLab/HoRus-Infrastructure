@@ -1,0 +1,18 @@
+# SSH Configuration for HoRus-Infrastructure
+Port {{ ssh_config.port }}
+Protocol 2
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+
+# Authentication
+PermitRootLogin {{ ssh_config.permit_root_login }}
+PubkeyAuthentication {{ ssh_config.pubkey_authentication }}
+PasswordAuthentication {{ ssh_config.password_authentication }}
+ChallengeResponseAuthentication no
+UsePAM yes
+
+X11Forwarding no
+PrintMotd no
+AcceptEnv LANG LC_*
+Subsystem sftp /usr/lib/openssh/sftp-server

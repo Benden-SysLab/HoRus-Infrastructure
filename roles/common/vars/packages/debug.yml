@@ -1,0 +1,6 @@
+---
+debug_packages:
+  - tree
+  - jq
+  - lsof
+  - strace

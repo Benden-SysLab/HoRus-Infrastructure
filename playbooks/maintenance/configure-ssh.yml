@@ -1,0 +1,12 @@
+---
+- name: "Operational: Configure SSH"
+  hosts: all
+  become: true
+  gather_facts: true
+  vars_files:
+    - "{{ playbook_dir }}/../../inventory/group_vars/vault_inventory.yml"
+  tasks:
+    - name: Run SSH task
+      ansible.builtin.include_role:
+        name: common
+        tasks_from: ssh

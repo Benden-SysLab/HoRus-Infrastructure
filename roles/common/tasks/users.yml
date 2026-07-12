@@ -1,0 +1,29 @@
+---
+- name: Create or update admin user
+  ansible.builtin.user:
+    name: "{{ users.admin.username }}"
+    shell: /bin/bash
+    groups: "{{ (users.admin.username == 'root') | ternary(omit, 'sudo') }}"
+    append: true
+    password: "{{ (users.admin.password.startswith('$')) | ternary(users.admin.password, users.admin.password | password_hash('sha512')) }}"
+    create_home: "{{ (users.admin.username == 'root') | ternary(false, true) }}"
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Create jenkins user (jenkins-srv)
+  ansible.builtin.user:
+    name: "{{ users.jenkins.username }}"
+    shell: /bin/bash
+    groups: sudo
+    append: true
+    password: "{{ (users.jenkins.password.startswith('$')) | ternary(users.jenkins.password, users.jenkins.password | password_hash('sha512')) }}"
+    create_home: true
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Configure Passwordless sudo for Jenkins
+  ansible.builtin.copy:
+    content: "{{ users.jenkins.username }} ALL=(ALL) NOPASSWD:ALL"
+    dest: "/etc/sudoers.d/{{ users.jenkins.username }}"
+    mode: '0440'
+    validate: /usr/sbin/visudo -cf %s
+  when: node_class | default('vm') != 'proxmox'
+

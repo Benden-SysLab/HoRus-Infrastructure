@@ -1,0 +1,41 @@
+---
+- name: Ensure infrastructure directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop: "{{ infra_base_dirs }}"
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Set authorized keys for root
+  ansible.posix.authorized_key:
+    user: root
+    state: present
+    key: "{{ lookup('file', playbook_dir + '/../' + ssh.root_public_key_path) }}"
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Set authorized keys for admin
+  ansible.posix.authorized_key:
+    user: "{{ users.admin.username }}"
+    state: present
+    key: "{{ lookup('file', playbook_dir + '/../' + ssh.admin_public_key_path) }}"
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Set authorized keys for jenkins
+  ansible.posix.authorized_key:
+    user: "{{ users.jenkins.username }}"
+    state: present
+    key: "{{ lookup('file', playbook_dir + '/../' + ssh.jenkins_public_key_path) }}"
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Hardening SSH Configuration
+  ansible.builtin.template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: '0644'
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Restart SSH
+  when: node_class | default('vm') != 'proxmox'
+

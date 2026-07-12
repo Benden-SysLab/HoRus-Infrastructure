@@ -1,0 +1,7 @@
+---
+monitoring_packages:
+  - htop
+  - btop
+  - sysstat
+  - iotop
+  - iftop

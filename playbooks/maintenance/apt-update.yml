@@ -1,0 +1,10 @@
+---
+- name: "Operational: Update APT Cache"
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Update APT cache
+      ansible.builtin.apt:
+        update_cache: yes
+      when: node_class | default('vm') != 'proxmox'

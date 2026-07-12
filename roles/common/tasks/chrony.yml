@@ -1,0 +1,13 @@
+---
+- name: Install Chrony package on non-LXC hosts
+  ansible.builtin.apt:
+    name: chrony
+    state: present
+  when: host_type | default('vm') != 'lxc'
+
+- name: Configure Chrony
+  ansible.builtin.service:
+    name: chrony
+    state: started
+    enabled: true
+  when: host_type | default('vm') != 'lxc'

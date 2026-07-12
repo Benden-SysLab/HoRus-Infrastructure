@@ -1,0 +1,15 @@
+---
+- name: "Operational: Install Network Tools"
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Load network package definitions
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../roles/common/vars/packages/network.yml"
+
+    - name: Install network packages on standard hosts
+      ansible.builtin.apt:
+        name: "{{ network_packages }}"
+        state: present
+      when: node_class | default('vm') != 'proxmox'

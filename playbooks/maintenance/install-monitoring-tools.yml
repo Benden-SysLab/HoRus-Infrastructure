@@ -1,0 +1,21 @@
+---
+- name: "Operational: Install Monitoring Tools"
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Load monitoring package definitions
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../roles/common/vars/packages/monitoring.yml"
+
+    - name: Install monitoring packages on standard hosts
+      ansible.builtin.apt:
+        name: "{{ monitoring_packages }}"
+        state: present
+      when: node_class | default('vm') != 'proxmox'
+
+    - name: Install btop on Proxmox hosts
+      ansible.builtin.apt:
+        name: btop
+        state: present
+      when: node_class | default('vm') == 'proxmox'

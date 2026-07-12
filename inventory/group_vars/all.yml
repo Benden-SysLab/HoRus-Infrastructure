@@ -1,0 +1,74 @@
+---
+# HoRus Global Configuration
+
+project:
+  name: "HoRus"
+  stage: "Stage 1 - Bootstrap"
+  version: "1.0.0"
+
+system:
+  timezone: "Europe/Moscow"
+  locale: "en_US.UTF-8"
+
+# SSH Infrastructure configuration
+ssh_config:
+  port: 22
+  permit_root_login: "prohibit-password"
+  password_authentication: "yes" # Required during bootstrap stage
+  pubkey_authentication: "yes"
+
+# Global connection settings for Ansible control-node
+ansible_user: "root"
+ansible_ssh_private_key_file: "{{ ssh.root_private_key_path }}"
+
+# Dynamic Proxy Configuration derived from vault_network
+proxy_env:
+  http_proxy: >-
+    {%- if vault_network is defined and vault_network.proxy is defined and vault_network.proxy.mode in ['forced', 'enabled'] and vault_network.proxy.host -%}
+      {%- if vault_network.proxy.username and vault_network.proxy.password -%}
+        {{ vault_network.proxy.type | default('http') }}://{{ vault_network.proxy.username }}:{{ vault_network.proxy.password }}@{{ vault_network.proxy.host }}:{{ vault_network.proxy.port }}
+      {%- else -%}
+        {{ vault_network.proxy.type | default('http') }}://{{ vault_network.proxy.host }}:{{ vault_network.proxy.port }}
+      {%- endif -%}
+    {%- else -%}
+      ""
+    {%- endif -%}
+  https_proxy: >-
+    {%- if vault_network is defined and vault_network.proxy is defined and vault_network.proxy.mode in ['forced', 'enabled'] and vault_network.proxy.host -%}
+      {%- if vault_network.proxy.username and vault_network.proxy.password -%}
+        {{ vault_network.proxy.type | default('http') }}://{{ vault_network.proxy.username }}:{{ vault_network.proxy.password }}@{{ vault_network.proxy.host }}:{{ vault_network.proxy.port }}
+      {%- else -%}
+        {{ vault_network.proxy.type | default('http') }}://{{ vault_network.proxy.host }}:{{ vault_network.proxy.port }}
+      {%- endif -%}
+    {%- else -%}
+      ""
+    {%- endif -%}
+  no_proxy: "{{ (vault_network is defined and vault_network.proxy is defined) | ternary(vault_network.proxy.no_proxy | default(''), '') }}"
+
+# Infrastructure Users & SSH Keys referenced from vault_inventory.yml
+users:
+  root:
+    username: "root"
+  admin:
+    username: "{{ vault_admin_username | default('root') }}"
+    password: "{{ vault_admin_password | default('$6$rounds=656000$example$hash') }}"
+  jenkins:
+    username: "{{ vault_jenkins_username | default('jenkins-srv') }}"
+    password: "{{ vault_jenkins_password | default('$6$rounds=656000$example$hash') }}"
+
+ssh:
+  root_public_key_path: "bootstrap/ssh/id_ed25519_root.pub"
+  root_private_key_path: "bootstrap/ssh/id_ed25519_root"
+  admin_public_key_path: "{{ vault_admin_ssh_pub_key | default('bootstrap/ssh/id_ed25519_root.pub') }}"
+  admin_private_key_path: "{{ vault_admin_ssh_priv_key | default('bootstrap/ssh/id_ed25519_root') }}"
+  jenkins_public_key_path: "{{ vault_jenkins_ssh_pub_key | default('bootstrap/ssh/id_ed25519_jenkins.pub') }}"
+  jenkins_private_key_path: "{{ vault_jenkins_ssh_priv_key | default('bootstrap/ssh/id_ed25519_jenkins') }}"
+
+# Required filesystem structure
+infra_base_dirs:
+  - /opt
+  - /opt/scripts
+  - /opt/container
+  - /srv
+  - /data
+

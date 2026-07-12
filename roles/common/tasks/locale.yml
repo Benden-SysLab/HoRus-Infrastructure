@@ -1,0 +1,11 @@
+---
+- name: Configure Locale
+  community.general.locale_gen:
+    name: "{{ system.locale }}"
+    state: present
+  when: node_class | default('vm') != 'proxmox'
+
+- name: Set Timezone
+  community.general.timezone:
+    name: "{{ system.timezone }}"
+

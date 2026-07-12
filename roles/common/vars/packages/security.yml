@@ -1,0 +1,5 @@
+---
+security_packages:
+  - ca-certificates
+  - gnupg
+  - openssh-server
