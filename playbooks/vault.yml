@@ -1,0 +1,9 @@
+---
+- name: "Stage 3.2 — HashiCorp Vault Deployment and Hardening"
+  hosts: vault
+  become: true
+  gather_facts: true
+  vars_files:
+    - "{{ playbook_dir }}/../inventory/group_vars/vault_inventory.yml"
+  roles:
+    - vault

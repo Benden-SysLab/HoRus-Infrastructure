@@ -42,26 +42,64 @@ HoRus-Infrastructure/
 ```
 
 
-## Quick Start
+## Quick Start (Installation & Deployment)
 
 1. **Install Dependencies**:
    ```bash
    ansible-galaxy collection install -r requirements.yml
    ```
 
-2. **Run Bootstrap (with Auto-healing & Auto-generation)**:
-   The playbook features built-in pre-flight auto-healing. Running the playbook will automatically generate any missing SSH keys inside `bootstrap/ssh/` (e.g. `root` and `jenkins-srv`) and securely auto-generate custom 256-character strong passwords (with automatic SHA-512 crypt hashing) inside `inventory/group_vars/vault_inventory.yml` if default placeholder passwords are detected.
+2. **Generate Passwords & Bootstrapping Secrets**:
+   Before running the playbooks, you must prepare the secret variables and SSH keys. You can do this by manually running the bootstrap script, or let the `common` playbook run it automatically.
+   
+   *   **Manual Generation**:
+       ```bash
+       python3 bootstrap/auto_prepare.py
+       ```
+   *   **What this does**:
+       - Creates `inventory/group_vars/vault_inventory.yml` from `inventory/group_vars/vault_inventory.yml.template` if it doesn't already exist.
+       - Generates cryptographically secure 256-character plaintext passwords and corresponding SHA-512 crypt hashes for administrative and service users.
+       - Saves the plaintext versions safely in `bootstrap/secrets_plain.txt` (this file is excluded via `.gitignore` to prevent leaks). No passwords are printed to `stdout` to avoid CI/CD or terminal log exposure.
+       - Generates the required SSH ED25519 keypairs for `root`, `admin`, and `jenkins` inside `bootstrap/ssh/`.
    
    **Customization**: By default, the main administrative user is configured as `root` inside the Git-excluded `vault_inventory.yml`. You can easily change this (e.g., to `abbenden-srv` or any other username), customize the private/public key paths, or configure your own passwords. The pre-flight generator script dynamically parses your `vault_inventory.yml` and generates the corresponding keys and secure passwords on-the-fly at your customized paths!
-   
-   ```bash
-   ansible-playbook -i inventory/syslab_hosts.yml playbooks/common.yml
-   ```
 
-   *(Optional)* If you only want to generate keys manually without running the playbook:
-   ```bash
-   ./bootstrap/ssh/generate_ssh_keys.sh
-   ```
+3. **Deploy & Harden Infrastructure**:
+   - **Stage 1 (OS Hardening & Bootstrap)**:
+     ```bash
+     ansible-playbook -i inventory/syslab_hosts.yml playbooks/common.yml
+     ```
+   - **Stage 2 & 3.1 (PostgreSQL Server & Service Databases Provisioning)**:
+     ```bash
+     ansible-playbook -i inventory/syslab_hosts.yml playbooks/postgresql.yml
+     ```
+
+## Stage 3: Service Databases, Access Hardening, and HashiCorp Vault Integration
+
+This Stage handles the complete deployment of platform service storage backends, credential management, security baselines, and enterprise secrets management via HashiCorp Vault.
+
+### Stage 3.1: PostgreSQL Service Databases & Access Hardening
+Deploys and hardens databases for platform services following the **Least Privilege Principle**. 
+- **Single Source of Truth**: All service configuration metadata lives in `inventory/group_vars/all.yml` under the `platform_services` dictionary namespace.
+- **Access Hardening**: Revokes `PUBLIC CONNECT` on all databases and limits connections strictly to the service owners.
+- **Verification**: Validates correct database ownership and TCP/IP SCRAM authentication via localhost.
+
+### Stage 3.2 - 3.5: HashiCorp Vault Enterprise Orchestration
+Deploys a robust, secure, and production-ready **HashiCorp Vault** deployment.
+
+1. **High-Availability Storage Backend**: Configured to run on PostgreSQL with systemd service orchestration and full configuration hardening.
+2. **Automated Initialization & Unsealing**: On first boot, Vault is initialized, and secure unseal/root credentials are automatically generated and securely saved locally inside `runtime/vault/` (with strict `0600` permissions and git-excluded). Subsequent runs automatically load recovery keys and perform unsealing seamlessly.
+3. **AppRole Authentication Engine (Root Token Ban)**: Enforces complete restriction of Root Token usage. Platform services (`jenkins`, `gitea`, `harbor`, `authentik`) authenticate using secure, isolated AppRoles bound to strict, minimal HCL policies.
+4. **Secrets Bootstrapping (JSON Pipe-lining)**: Writes initial service credentials, TLS keys, Docker, and GitHub keys into Vault. Standard CLI inputs are bypassed; credentials are piped as structured JSON to ensure high safety against special characters and shell escaping issues.
+5. **Advanced SRE Validation & Health Checks**:
+   - **Full-API Smoke-Test**: Performs live KV write, KV read, KV destroy, and KV metadata deletion checks on dedicated internal paths (`secret/system/healthcheck`).
+   - **AppRole Smoke-Test**: Exercises full authentication, token generation, and policy verification by logging in under service AppRoles and asserting readability.
+   - **PostgreSQL Context Checks**: Asserts PostgreSQL table ownership and validates read-access (`SELECT COUNT(*)`) under the restricted `vault` role.
+   - **TLS Certificate Validation**: Inspects SSL/TLS SANs and verifies certificate expiration thresholds (>7 days) natively via OpenSSL commands.
+   - **Local Backup Validation**: Assures integrity and format of local backup credentials (`init.json`, `recovery.json`, `approles.json`).
+   - **Version Drift Check**: Compares desired version with actual installed version and logs warning alerts on mismatches.
+   - **Optional Performance Benchmarks**: Sequential KV latency performance measurement (measuring total/avg milliseconds per operation).
+6. **Self-Healing Disaster Recovery**: Automatically corrects configuration drifts, restores table owners/privileges, repairs missing systemd unit files, and restores tampered/deleted `vault.hcl` settings.
 
 ## Useful Commands
 
@@ -139,8 +177,9 @@ The project is designed to support event-driven execution:
 
 - [x] **Stage 1**: Common Operating System Bootstrap & Hardening.
 - [x] **Stage 2**: PostgreSQL 18 Production-ready Database Server Deployment.
-- [ ] **Stage 3**: Network and Storage Infrastructure.
-- [ ] **Stage 4**: HoRus Control Plane deployment.
+- [x] **Stage 3.1**: PostgreSQL Service Preparation (Databases, Users & Access Hardening).
+- [x] **Stage 3.2 - 3.5**: HashiCorp Vault Integration (Deployment, Policies & AppRoles, Secrets Bootstrap, SRE Validation & Self-Healing Disaster Recovery).
+- [ ] **Stage 4**: HoRus Control Plane deployment (Authentik, Gitea, Jenkins, Harbor, Monitoring).
 
 
 ## Engineering Standards

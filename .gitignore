@@ -2,10 +2,6 @@
 *.retry
 *.log
 
-# Python
-__pycache__/
-*.pyc
-
 # Secrets and Keys
 # Ignore everything in these directories...
 /bootstrap/ssh/*
@@ -27,25 +23,11 @@ __pycache__/
 .idea/
 .history/
 
+# Deployment Reports
+results/
+/runtime/
+
 # Node/Vite (if any residue)
 node_modules/
 dist/
 .env
-
-*.rar
-*.zip
-*.7z
-
-# SSH keys
-bootstrap/ssh/id_*
-
-# Molecule
-.molecule/
-
-# IDE
-.vscode/
-.idea/
-
-# OS
-.DS_Store
-Thumbs.db

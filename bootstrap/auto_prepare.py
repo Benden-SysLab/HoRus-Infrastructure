@@ -151,6 +151,14 @@ def check_and_harden_passwords(config):
     existing_admin_plain = None
     existing_jenkins_plain = None
 
+    db_keys = [
+        "vault_postgres_password",
+        "gitea_postgres_password",
+        "harbor_postgres_password",
+        "authentik_postgres_password"
+    ]
+    db_plains = {k: None for k in db_keys}
+
     # Fallback: check secrets_plain.txt first
     secrets_path = os.path.join(BASE_DIR, "bootstrap/secrets_plain.txt")
     if os.path.exists(secrets_path):
@@ -162,6 +170,10 @@ def check_and_harden_passwords(config):
                         existing_admin_plain = stripped.split(":", 1)[1].strip()
                     elif stripped.startswith("vault_jenkins_password:"):
                         existing_jenkins_plain = stripped.split(":", 1)[1].strip()
+                    else:
+                        for db_key in db_keys:
+                            if stripped.startswith(f"{db_key}:"):
+                                db_plains[db_key] = stripped.split(":", 1)[1].strip()
         except Exception:
             pass
 
@@ -176,6 +188,14 @@ def check_and_harden_passwords(config):
             existing_jenkins_plain = stripped.split(":", 1)[1].strip().strip('"').strip("'")
             if "#" in existing_jenkins_plain:
                 existing_jenkins_plain = existing_jenkins_plain.split("#", 1)[0].strip().strip('"').strip("'")
+        else:
+            for db_key in db_keys:
+                if stripped.startswith(f"{db_key}:"):
+                    val = stripped.split(":", 1)[1].strip().strip('"').strip("'")
+                    if "#" in val:
+                        val = val.split("#", 1)[0].strip().strip('"').strip("'")
+                    if val not in PLACEHOLDERS and "replace_me" not in val.lower() and not val.startswith("REPLACE_"):
+                        db_plains[db_key] = val
 
     new_lines = []
     for line in lines:
@@ -227,14 +247,32 @@ def check_and_harden_passwords(config):
             if jenkins_plain:
                 new_lines.append(f'vault_jenkins_plaintext_password: "{jenkins_plain}"\n')
         else:
-            new_lines.append(line)
+            # Handle database keys
+            handled = False
+            for db_key in db_keys:
+                if stripped.startswith(f"{db_key}:"):
+                    val = stripped.split(":", 1)[1].strip().strip('"').strip("'")
+                    if "#" in val:
+                        val = val.split("#", 1)[0].strip().strip('"').strip("'")
+                    if val in PLACEHOLDERS or "replace_me" in val.lower() or val.startswith("REPLACE_"):
+                        print(f"[PREP] Default/Placeholder password detected for {db_key}. Generating secure password...")
+                        db_plains[db_key] = generate_secure_password(24)
+                        line = f'{db_key}: "{db_plains[db_key]}"\n'
+                    else:
+                        db_plains[db_key] = val
+                        line = f'{db_key}: "{val}"\n'
+                    new_lines.append(line)
+                    handled = True
+                    break
+            if not handled:
+                new_lines.append(line)
 
     modified = (new_lines != lines)
 
     if modified:
         with open(VAULT_PATH, "w") as f:
             f.writelines(new_lines)
-        print("[OK] vault_inventory.yml has been updated with SHA-512 crypt-hashed passwords.")
+        print("[OK] vault_inventory.yml has been updated with secure passwords.")
         
         # Write plaintext passwords to separate ignored file
         secrets_path = os.path.join(BASE_DIR, "bootstrap/secrets_plain.txt")
@@ -247,6 +285,10 @@ def check_and_harden_passwords(config):
                 if jenkins_plain:
                     sf.write(f"vault_jenkins_username: {config['jenkins_user']}\n")
                     sf.write(f"vault_jenkins_password: {jenkins_plain}\n\n")
+                sf.write("=== DATABASE CREDENTIALS ===\n")
+                for db_key, db_val in db_plains.items():
+                    if db_val:
+                        sf.write(f"{db_key}: {db_val}\n")
             
             print(f"\n[OK] Plaintext passwords saved for your convenience to:")
             print(f"     -> {os.path.abspath(secrets_path)}")

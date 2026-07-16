@@ -25,3 +25,9 @@ vault_network:
     username: ""
     password: ""
     no_proxy: "localhost,127.0.0.1,.benden-syslab.com"
+
+# Database Configuration Secrets
+vault_postgres_password: "REPLACE_WITH_VAULT_POSTGRES_PASSWORD"
+gitea_postgres_password: "REPLACE_WITH_GITEA_POSTGRES_PASSWORD"
+harbor_postgres_password: "REPLACE_WITH_HARBOR_POSTGRES_PASSWORD"
+authentik_postgres_password: "REPLACE_WITH_AUTHENTIK_POSTGRES_PASSWORD"

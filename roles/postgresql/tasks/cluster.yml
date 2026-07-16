@@ -1,0 +1,24 @@
+---
+- name: Check if custom database files already exist in custom data directory
+  ansible.builtin.stat:
+    path: "{{ postgresql_data_dir }}/PG_VERSION"
+  register: pg_data_version_stat
+
+- name: Create custom PostgreSQL cluster using pg_createcluster
+  ansible.builtin.command:
+    cmd: "pg_createcluster -d {{ postgresql_data_dir }} {{ postgresql_version }} main -- --waldir={{ postgresql_wal_dir }} --data-checksums"
+  become: true
+  become_user: root
+  when:
+    - not pg_data_version_stat.stat.exists
+
+- name: Ensure PostgreSQL configuration directory and conf.d exist with proper permissions
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0755'
+  loop:
+    - "/etc/postgresql/{{ postgresql_version }}/main"
+    - "/etc/postgresql/{{ postgresql_version }}/main/conf.d"

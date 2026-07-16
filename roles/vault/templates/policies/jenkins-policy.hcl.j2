@@ -1,0 +1,24 @@
+path "secret/data/platform/databases/*" {
+  capabilities = ["read", "list"]
+}
+
+path "secret/data/platform/tls" {
+  capabilities = ["read", "list"]
+}
+
+path "secret/data/platform/docker" {
+  capabilities = ["read", "list"]
+}
+
+path "secret/data/platform/github" {
+  capabilities = ["read", "list"]
+}
+
+# Future PKI Engine Access for certificate issuance
+path "pki/issue/jenkins-cert-role" {
+  capabilities = ["create", "update"]
+}
+
+path "pki/cert/ca" {
+  capabilities = ["read"]
+}

@@ -9,8 +9,12 @@
       ansible.builtin.import_tasks: repo.yml
     - name: Install packages
       ansible.builtin.import_tasks: install.yml
-    - name: Configure database
+    - name: Verify storage mountpoints and security
+      ansible.builtin.import_tasks: storage.yml
+    - name: Register and initialize PostgreSQL cluster (Debian-compliant)
+      ansible.builtin.import_tasks: cluster.yml
+    - name: Deploy configuration templates
       ansible.builtin.import_tasks: config.yml
-    - name: Setup services and databases
+    - name: Manage service state and run validations
       ansible.builtin.import_tasks: service.yml
   when: (postgresql_package_state | default('present')) == 'present'

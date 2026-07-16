@@ -1,0 +1,170 @@
+---
+# roles/vault/tasks/configure.yml
+
+- name: Create Vault configuration directory
+  ansible.builtin.file:
+    path: /etc/vault.d
+    state: directory
+    owner: root
+    group: vault
+    mode: '0750'
+
+- name: Ensure certificates directory exists
+  ansible.builtin.file:
+    path: "{{ vault_cert_dir }}"
+    state: directory
+    owner: root
+    group: vault
+    mode: '0750'
+
+- name: Check if SSL certificate exists
+  ansible.builtin.stat:
+    path: "{{ vault_cert_file }}"
+  register: vault_cert_stat
+
+- name: Check if SSL key exists
+  ansible.builtin.stat:
+    path: "{{ vault_key_file }}"
+  register: vault_key_stat
+
+- name: Generate self-signed SSL certificate for Vault if missing
+  ansible.builtin.command: >
+    openssl req -x509 -newkey rsa:4096
+    -keyout "{{ vault_key_file }}"
+    -out "{{ vault_cert_file }}"
+    -sha256 -days 3650 -nodes
+    -subj "/CN=vault.infra.benden-syslab.com"
+    -addext "subjectAltName=DNS:vault.infra.benden-syslab.com,DNS:localhost,IP:127.0.0.1,IP:{{ ansible_host }}"
+  when: not vault_cert_stat.stat.exists or not vault_key_stat.stat.exists
+  notify: Restart Vault
+
+- name: Set correct permissions on Vault SSL files
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: root
+    group: vault
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ vault_cert_file }}", mode: '0644' }
+    - { path: "{{ vault_key_file }}", mode: '0640' }
+
+- name: Render Vault configuration file
+  ansible.builtin.template:
+    src: vault.hcl.j2
+    dest: /etc/vault.d/vault.hcl
+    owner: root
+    group: vault
+    mode: '0640'
+  notify: Restart Vault
+
+- name: Create Vault systemd service file
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/vault.service
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description="HashiCorp Vault - A tool for managing secrets"
+      Documentation=https://www.vaultproject.io/docs/
+      Requires=network-online.target
+      After=network-online.target
+
+      [Service]
+      User=vault
+      Group=vault
+      ProtectSystem=full
+      ProtectHome=read-only
+      PrivateTmp=yes
+      PrivateDevices=yes
+      SecureBits=keep-caps
+      AmbientCapabilities=CAP_IPC_LOCK
+      CapabilityBoundingSet=CAP_SYSLOG CAP_IPC_LOCK
+      NoNewPrivileges=yes
+      ExecStart=/usr/bin/vault server -config=/etc/vault.d/vault.hcl
+      ExecReload=/bin/kill --signal HUP $MAINPID
+      KillMode=control-group
+      Restart=on-failure
+      RestartSec=5
+      LimitNOFILE=65536
+      LimitMEMLOCK=infinity
+
+      [Install]
+      WantedBy=multi-user.target
+  register: vault_service_file
+  notify: Restart Vault
+
+- name: Force systemd daemon reload
+  ansible.builtin.systemd:
+    daemon_reload: yes
+  when: vault_service_file.changed
+
+- name: Pre-flight check - Validate Vault storage database and schema readiness
+  block:
+    - name: Query table schema from PostgreSQL database as Vault user
+      ansible.builtin.command:
+        argv:
+          - psql
+          - -h
+          - 127.0.0.1
+          - -U
+          - "{{ vault_postgres_user }}"
+          - -d
+          - "{{ vault_postgres_db }}"
+          - -t
+          - -A
+          - -c
+          - |
+            SELECT COUNT(column_name)
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'vault_kv_store'
+              AND column_name IN ('parent_path', 'path', 'key', 'value');
+      environment:
+        PGPASSWORD: "{{ vault_postgres_password }}"
+      delegate_to: horus-db-srv01
+      changed_when: false
+      register: vault_preflight_db_check
+      failed_when: false
+      become: true
+      become_user: postgres
+
+    - name: Assert database connection and table schema are valid
+      ansible.builtin.assert:
+        that:
+          - vault_preflight_db_check.rc == 0
+          - vault_preflight_db_check.stdout | trim == '4'
+        fail_msg: >
+          Vault Pre-flight Check Failed:
+          Unable to connect to database '{{ vault_postgres_db }}' as user '{{ vault_postgres_user }}',
+          or table 'vault_kv_store' is missing required columns (parent_path, path, key, value).
+          Command RC: {{ vault_preflight_db_check.rc }}
+          Command Output: {{ vault_preflight_db_check.stdout }}
+          Command Error: {{ vault_preflight_db_check.stderr | default('') }}
+
+- name: Flush handlers to apply Vault configuration immediately
+  meta: flush_handlers
+
+- name: Ensure Vault service is started and enabled
+  ansible.builtin.systemd:
+    name: "{{ vault_service_name }}"
+    state: "{{ vault_service_state }}"
+    enabled: "{{ vault_service_enabled }}"
+
+- name: Wait for Vault port to be open
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ vault_api_port }}"
+    timeout: 30
+
+- name: Verify Vault API status via health endpoint
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ vault_api_port }}/v1/sys/health"
+    method: GET
+    validate_certs: yes
+    ca_path: "{{ vault_cert_file }}"
+    status_code: [200, 429, 472, 473, 501, 503]
+  register: vault_api_health
+  until: vault_api_health.status in [200, 429, 472, 473, 501, 503]
+  retries: 15
+  delay: 2

@@ -1,0 +1,20 @@
+path "secret/data/platform/databases/harbor" {
+  capabilities = ["read"]
+}
+
+path "secret/data/platform/tls" {
+  capabilities = ["read"]
+}
+
+path "secret/data/platform/docker" {
+  capabilities = ["read"]
+}
+
+# Future PKI Engine Access for certificate issuance
+path "pki/issue/harbor-cert-role" {
+  capabilities = ["create", "update"]
+}
+
+path "pki/cert/ca" {
+  capabilities = ["read"]
+}

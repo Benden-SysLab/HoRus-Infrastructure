@@ -1,0 +1,196 @@
+---
+# roles/vault/tasks/database.yml
+
+- name: Create PostgreSQL user for Vault
+  community.postgresql.postgresql_user:
+    name: "{{ vault_postgres_user }}"
+    password: "{{ vault_postgres_password }}"
+    role_attr_flags: "NOSUPERUSER,NOCREATEDB,NOCREATEROLE,NOREPLICATION"
+    login_unix_socket: /var/run/postgresql
+  delegate_to: horus-db-srv01
+  become: true
+  become_user: postgres
+
+- name: Create PostgreSQL database for Vault
+  community.postgresql.postgresql_db:
+    name: "{{ vault_postgres_db }}"
+    owner: "{{ vault_postgres_user }}"
+    login_unix_socket: /var/run/postgresql
+  delegate_to: horus-db-srv01
+  become: true
+  become_user: postgres
+
+- name: Revoke public CONNECT privilege on Vault database
+  community.postgresql.postgresql_privs:
+    database: "{{ vault_postgres_db }}"
+    role: PUBLIC
+    type: database
+    privs: CONNECT
+    state: absent
+    login_unix_socket: /var/run/postgresql
+  delegate_to: horus-db-srv01
+  become: true
+  become_user: postgres
+
+- name: Grant CONNECT privilege on Vault database to Vault user
+  community.postgresql.postgresql_privs:
+    database: "{{ vault_postgres_db }}"
+    role: "{{ vault_postgres_user }}"
+    type: database
+    privs: CONNECT
+    state: present
+    login_unix_socket: /var/run/postgresql
+  delegate_to: horus-db-srv01
+  become: true
+  become_user: postgres
+
+- name: Verify Vault database connection
+  ansible.builtin.command:
+    argv:
+      - psql
+      - -h
+      - 127.0.0.1
+      - -U
+      - "{{ vault_postgres_user }}"
+      - -d
+      - "{{ vault_postgres_db }}"
+      - -t
+      - -A
+      - -c
+      - "SELECT current_user;"
+  environment:
+    PGPASSWORD: "{{ vault_postgres_password }}"
+  delegate_to: horus-db-srv01
+  changed_when: false
+  register: vault_db_conn_check
+  failed_when: vault_db_conn_check.rc != 0 or vault_db_conn_check.stdout | trim != vault_postgres_user
+  become: true
+  become_user: postgres
+
+- name: Check if vault_kv_store table exists
+  community.postgresql.postgresql_query:
+    login_db: "{{ vault_postgres_db }}"
+    query: |
+      SELECT tableowner
+      FROM pg_tables
+      WHERE tablename = 'vault_kv_store';
+    login_unix_socket: /var/run/postgresql
+  register: table_exists_check
+  delegate_to: horus-db-srv01
+  changed_when: false
+  become: true
+  become_user: postgres
+
+- name: Create PostgreSQL table for Vault storage backend
+  community.postgresql.postgresql_query:
+    login_db: "{{ vault_postgres_db }}"
+    query: |
+      CREATE TABLE vault_kv_store (
+        parent_path TEXT COLLATE "C" NOT NULL,
+        path TEXT COLLATE "C",
+        key TEXT COLLATE "C",
+        value BYTEA,
+        CONSTRAINT vault_kv_store_pkey PRIMARY KEY (path, key)
+      );
+    login_unix_socket: /var/run/postgresql
+  delegate_to: horus-db-srv01
+  become: true
+  become_user: postgres
+  when: table_exists_check.query_result | length == 0
+
+- name: Set owner of vault_kv_store table to Vault user
+  community.postgresql.postgresql_query:
+    login_db: "{{ vault_postgres_db }}"
+    query: "ALTER TABLE vault_kv_store OWNER TO {{ vault_postgres_user }};"
+    login_unix_socket: /var/run/postgresql
+  delegate_to: horus-db-srv01
+  become: true
+  become_user: postgres
+  when: >
+    table_exists_check.query_result | length == 0 or
+    (table_exists_check.query_result[0] | default({'tableowner': ''})).tableowner != vault_postgres_user
+
+- name: Grant ALL privileges on vault_kv_store table to Vault user
+  community.postgresql.postgresql_privs:
+    database: "{{ vault_postgres_db }}"
+    role: "{{ vault_postgres_user }}"
+    objs: "vault_kv_store"
+    type: table
+    privs: ALL
+    state: present
+    login_unix_socket: /var/run/postgresql
+  delegate_to: horus-db-srv01
+  become: true
+  become_user: postgres
+
+- name: Query owner and privileges of vault_kv_store table
+  community.postgresql.postgresql_query:
+    login_db: "{{ vault_postgres_db }}"
+    query: |
+      SELECT
+          tableowner,
+          has_table_privilege('{{ vault_postgres_user }}', 'vault_kv_store', 'SELECT') AS select_ok,
+          has_table_privilege('{{ vault_postgres_user }}', 'vault_kv_store', 'INSERT') AS insert_ok,
+          has_table_privilege('{{ vault_postgres_user }}', 'vault_kv_store', 'UPDATE') AS update_ok,
+          has_table_privilege('{{ vault_postgres_user }}', 'vault_kv_store', 'DELETE') AS delete_ok
+      FROM pg_tables
+      WHERE tablename = 'vault_kv_store';
+    login_unix_socket: /var/run/postgresql
+  register: table_status_check
+  delegate_to: horus-db-srv01
+  changed_when: false
+  become: true
+  become_user: postgres
+
+- name: Assert vault_kv_store table owner and privileges are correct
+  ansible.builtin.assert:
+    that:
+      - table_status_check.query_result is defined
+      - table_status_check.query_result | length > 0
+      - table_status_check.query_result[0].tableowner == vault_postgres_user
+      - table_status_check.query_result[0].select_ok | bool
+      - table_status_check.query_result[0].insert_ok | bool
+      - table_status_check.query_result[0].update_ok | bool
+      - table_status_check.query_result[0].delete_ok | bool
+    fail_msg: >
+      Table 'vault_kv_store' configuration is invalid.
+      Expected owner: {{ vault_postgres_user }}
+      Status details: {{ table_status_check.query_result[0] | default('No results') }}
+
+- name: Verify vault_kv_store table is readable by checking row count
+  community.postgresql.postgresql_query:
+    login_db: "{{ vault_postgres_db }}"
+    query: "SELECT COUNT(*) FROM vault_kv_store;"
+    login_unix_socket: /var/run/postgresql
+  register: table_row_count_check
+  delegate_to: horus-db-srv01
+  changed_when: false
+  become: true
+  become_user: postgres
+
+- name: Assert vault_kv_store table readability is verified
+  ansible.builtin.assert:
+    that:
+      - table_row_count_check.query_result is defined
+      - table_row_count_check.query_result | length > 0
+    fail_msg: "Failed to read row count from 'vault_kv_store' table."
+
+- name: Verify vault role connection to PostgreSQL database
+  community.postgresql.postgresql_query:
+    login_host: 127.0.0.1
+    login_port: "{{ vault_postgres_port }}"
+    login_db: "{{ vault_postgres_db }}"
+    login_user: "{{ vault_postgres_user }}"
+    login_password: "{{ vault_postgres_password }}"
+    query: "SELECT current_user, current_database();"
+  register: db_role_connection_check
+  delegate_to: horus-db-srv01
+  changed_when: false
+
+- name: Assert vault role database connection and context are correct
+  ansible.builtin.assert:
+    that:
+      - db_role_connection_check.query_result is defined
+      - db_role_connection_check.query_result[0].current_user == vault_postgres_user
+      - db_role_connection_check.query_result[0].current_database == vault_postgres_db
+    fail_msg: "Database connection check under role {{ vault_postgres_user }} failed!"

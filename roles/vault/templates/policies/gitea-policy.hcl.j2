@@ -1,0 +1,20 @@
+path "secret/data/platform/databases/gitea" {
+  capabilities = ["read"]
+}
+
+path "secret/data/platform/tls" {
+  capabilities = ["read"]
+}
+
+path "secret/data/platform/github" {
+  capabilities = ["read"]
+}
+
+# Future PKI Engine Access for certificate issuance
+path "pki/issue/gitea-cert-role" {
+  capabilities = ["create", "update"]
+}
+
+path "pki/cert/ca" {
+  capabilities = ["read"]
+}

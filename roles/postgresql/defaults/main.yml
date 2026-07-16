@@ -13,9 +13,12 @@ postgresql_packages:
 postgresql_python_packages:
   - python3-psycopg2
 
-# Directories
+# Directories and Mountpoints
+postgresql_data_mount: "/var/lib/postgresql/data"
+postgresql_data_dir: "/var/lib/postgresql/data/main"
+postgresql_wal_mount: "/var/lib/postgresql/wal"
+postgresql_wal_dir: "/var/lib/postgresql/wal/main"
 postgresql_conf_dir: "/etc/postgresql/{{ postgresql_version }}/main"
-postgresql_data_dir: "/var/lib/postgresql/{{ postgresql_version }}/main"
 
 # Service configuration
 postgresql_service_name: "postgresql"
@@ -33,24 +36,21 @@ postgresql_settings:
   maintenance_work_mem: '64MB'
   effective_cache_size: '384MB'
   wal_level: 'replica'
-  max_wal_size: '1GB'
-  min_wal_size: '80MB'
+  max_wal_size: '4GB'
+  min_wal_size: '1GB'
   checkpoint_completion_target: 0.9
-  checkpoint_timeout: '5min'
+  checkpoint_timeout: '10min'
+  wal_buffers: '16MB'
   password_encryption: 'scram-sha-256'
+  wal_keep_size: '512MB'
+
+# Dynamic Libraries (shared_preload_libraries configuration)
+postgresql_shared_preload_libraries: []
 
 postgresql_package_state: "present"
 postgresql_listen_addresses: "*"
 postgresql_auth_method: "scram-sha-256"
 postgresql_allowed_subnet: "0.0.0.0/0"
-
-db_gitea_user: "gitea"
-db_gitea_password: "gitea_password_change_me"
-db_gitea_name: "gitea"
-
-db_authentik_user: "authentik"
-db_authentik_password: "authentik_password_change_me"
-db_authentik_name: "authentik"
 
 # PostgreSQL Access Rules (pg_hba.conf)
 postgresql_pg_hba_rules:
@@ -66,3 +66,11 @@ postgresql_pg_hba_rules:
 # Repository configuration
 postgresql_repo_keyring: "/etc/apt/keyrings/pgdg.asc"
 postgresql_repo_file: "/etc/apt/sources.list.d/pgdg.list"
+
+# Storage Validation Constraints
+postgresql_min_wal_free_space_gb: 2
+postgresql_min_data_free_space_gb: 10
+postgresql_expected_fstypes:
+  - ext4
+  - xfs
+

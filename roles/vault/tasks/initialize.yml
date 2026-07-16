@@ -1,0 +1,830 @@
+---
+# roles/vault/tasks/initialize.yml
+
+- name: Ensure local runtime/vault directory exists
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../runtime/vault"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+
+- name: Check local keys file existence
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../runtime/vault/init.json"
+  register: local_keys_file
+  delegate_to: localhost
+  become: false
+
+- name: Get checksum of local keys file
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../runtime/vault/init.json"
+    checksum_algorithm: sha256
+  register: local_keys_checksum
+  delegate_to: localhost
+  become: false
+  when: local_keys_file.stat.exists
+
+- name: Set Vault keys SHA256 fact
+  ansible.builtin.set_fact:
+    vault_keys_sha256: "{{ local_keys_checksum.stat.checksum | default('UNKNOWN') }}"
+
+- name: Load local Vault keys
+  ansible.builtin.set_fact:
+    vault_keys: "{{ lookup('file', playbook_dir + '/../runtime/vault/init.json') | from_json }}"
+  when: local_keys_file.stat.exists
+  delegate_to: localhost
+  become: false
+
+- name: Set initial deployment flag
+  ansible.builtin.set_fact:
+    is_initial_deployment: "{{ not local_keys_file.stat.exists }}"
+
+- name: Check Vault initialization status
+  ansible.builtin.command: vault status -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+  register: vault_status_raw
+  failed_when: false
+  changed_when: false
+
+- name: Assert Vault keys exist if Vault is already initialized
+  ansible.builtin.assert:
+    that:
+      - vault_keys is defined
+    fail_msg: >
+      Vault is already initialized but local init.json/root_token keys are missing from 'runtime/vault/'.
+      Please restore the keys to 'runtime/vault/init.json' or re-deploy Vault in a clean environment.
+  when: >
+    vault_status_raw.stdout is defined and
+    vault_status_raw.stdout | trim != '' and
+    '"initialized": true' in vault_status_raw.stdout
+
+- name: Initialize Vault if not initialized
+  ansible.builtin.command: vault operator init -key-shares=5 -key-threshold=3 -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+  register: vault_init_raw
+  when: >
+    vault_status_raw.stdout is not defined or
+    vault_status_raw.stdout | trim == '' or
+    '"initialized": true' not in vault_status_raw.stdout
+
+- name: Check local Root Token file existence
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../runtime/vault/root_token.txt"
+  register: local_root_token_file
+  delegate_to: localhost
+  become: false
+
+- name: Check local Recovery Keys file existence
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../runtime/vault/recovery.json"
+  register: local_recovery_file
+  delegate_to: localhost
+  become: false
+
+- name: Save newly generated Vault keys locally
+  ansible.builtin.copy:
+    content: "{{ vault_init_raw.stdout }}"
+    dest: "{{ playbook_dir }}/../runtime/vault/init.json"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  when: vault_init_raw is defined and vault_init_raw.changed
+
+- name: Reload freshly generated Vault keys
+  ansible.builtin.set_fact:
+    vault_keys: "{{ vault_init_raw.stdout | from_json }}"
+  when: vault_init_raw is defined and vault_init_raw.changed
+
+- name: Save Root Token separately on localhost for extra security
+  ansible.builtin.copy:
+    content: "{{ vault_keys.root_token }}"
+    dest: "{{ playbook_dir }}/../runtime/vault/root_token.txt"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  when: >
+    (vault_init_raw is defined and vault_init_raw.changed) or
+    not local_root_token_file.stat.exists
+
+- name: Save Unseal Keys separately on localhost for extra security
+  ansible.builtin.copy:
+    content: "{{ vault_keys.unseal_keys_b64 | to_nice_json }}"
+    dest: "{{ playbook_dir }}/../runtime/vault/recovery.json"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  when: >
+    (vault_init_raw is defined and vault_init_raw.changed) or
+    not local_recovery_file.stat.exists
+
+- name: Recheck Vault status for sealing
+  ansible.builtin.command: vault status -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+  register: vault_status_sealed_raw
+  failed_when: false
+  changed_when: false
+
+- name: Validate Vault status response
+  ansible.builtin.assert:
+    that:
+      - vault_status_sealed_raw.stdout is defined
+      - vault_status_sealed_raw.stdout | trim != ''
+      - (vault_status_sealed_raw.stdout | from_json).initialized is defined
+    fail_msg: >
+      Vault is not responding correctly or returned invalid JSON.
+      Command RC: {{ vault_status_sealed_raw.rc }}
+      Command Error: {{ vault_status_sealed_raw.stderr }}
+
+- name: Parse seal status
+  ansible.builtin.set_fact:
+    vault_sealed: "{{ (vault_status_sealed_raw.stdout | from_json).sealed }}"
+
+- name: Unseal Vault
+  ansible.builtin.command: "vault operator unseal {{ item }}"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+  loop: "{{ vault_keys.unseal_keys_b64[:3] }}"
+  when: vault_sealed | bool
+
+- name: Check enabled secrets engines
+  ansible.builtin.command: vault secrets list -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  register: secrets_list_raw
+  changed_when: false
+
+- name: Enable KV v2 secrets engine at secret/
+  ansible.builtin.command: vault secrets enable -path=secret kv-v2
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  when: "'secret/' not in (secrets_list_raw.stdout | from_json)"
+
+- name: Create policies directory
+  ansible.builtin.file:
+    path: /etc/vault.d/policies
+    state: directory
+    owner: root
+    group: vault
+    mode: '0750'
+
+- name: Render HCL Policy files
+  ansible.builtin.template:
+    src: "policies/{{ item }}.hcl.j2"
+    dest: "/etc/vault.d/policies/{{ item }}.hcl"
+    owner: root
+    group: vault
+    mode: '0640'
+  loop:
+    - admin-policy
+    - jenkins-policy
+    - gitea-policy
+    - harbor-policy
+    - authentik-policy
+
+- name: Read existing HCL policies from Vault
+  ansible.builtin.command: "vault policy read {{ item }}"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  register: existing_vault_policies
+  loop:
+    - admin-policy
+    - jenkins-policy
+    - gitea-policy
+    - harbor-policy
+    - authentik-policy
+  failed_when: false
+  changed_when: false
+
+- name: Slurp rendered HCL policy files
+  ansible.builtin.slurp:
+    src: "/etc/vault.d/policies/{{ item }}.hcl"
+  register: slurped_rendered_policies
+  loop:
+    - admin-policy
+    - jenkins-policy
+    - gitea-policy
+    - harbor-policy
+    - authentik-policy
+
+- name: Apply HCL policies to Vault
+  ansible.builtin.command: "vault policy write {{ item.item }} /etc/vault.d/policies/{{ item.item }}.hcl"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  loop: "{{ slurped_rendered_policies.results }}"
+  vars:
+    existing_policy: "{{ (existing_vault_policies.results | selectattr('item', 'equalto', item.item) | first) }}"
+    rendered_content: "{{ item.content | b64decode }}"
+  when: >
+    existing_policy.rc != 0 or
+    (existing_policy.stdout | default('') | replace('\r\n', '\n') | trim) != (rendered_content | replace('\r\n', '\n') | trim)
+
+- name: Check enabled auth methods
+  ansible.builtin.command: vault auth list -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  register: auth_list_raw
+  changed_when: false
+
+- name: Enable AppRole auth method
+  ansible.builtin.command: vault auth enable approle
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  when: "'approle/' not in (auth_list_raw.stdout | from_json)"
+
+- name: Read existing AppRole configurations
+  ansible.builtin.command: "vault read -format=json auth/approle/role/{{ item }}"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  register: existing_approles
+  loop:
+    - jenkins
+    - gitea
+    - harbor
+    - authentik
+  failed_when: false
+  changed_when: false
+
+- name: Configure AppRoles for platform services
+  ansible.builtin.command: "vault write auth/approle/role/{{ item.item }} token_policies={{ item.item }}-policy token_ttl=1h token_max_ttl=4h"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  loop: "{{ existing_approles.results }}"
+  vars:
+    approle_config: "{{ item.stdout | from_json if item.rc == 0 else {} }}"
+  when: >
+    item.rc != 0 or
+    approle_config.data is not defined or
+    (approle_config.data.token_policies | default([]) | sort) != [ item.item + '-policy' ] or
+    approle_config.data.token_ttl | int != 3600 or
+    approle_config.data.token_max_ttl | int != 14400
+
+- name: Check if local AppRoles file exists
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../runtime/vault/approles.json"
+  register: local_approles_file
+  delegate_to: localhost
+  become: false
+
+- name: Load local AppRoles file
+  ansible.builtin.set_fact:
+    local_approles: "{{ lookup('file', playbook_dir + '/../runtime/vault/approles.json') | from_json }}"
+  when: local_approles_file.stat.exists
+  delegate_to: localhost
+  become: false
+
+- name: Initialize local AppRoles fact if missing
+  ansible.builtin.set_fact:
+    local_approles: {}
+  when: not local_approles_file.stat.exists
+
+- name: Retrieve RoleID for AppRoles
+  ansible.builtin.command: "vault read -field=role_id auth/approle/role/{{ item }}/role-id"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  register: approle_role_ids
+  loop:
+    - jenkins
+    - gitea
+    - harbor
+    - authentik
+  changed_when: false
+
+- name: Generate SecretID for AppRoles (Only if not already stored locally)
+  ansible.builtin.command: "vault write -f -field=secret_id auth/approle/role/{{ item }}/secret-id"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  register: approle_new_secret_ids
+  loop:
+    - jenkins
+    - gitea
+    - harbor
+    - authentik
+  when: local_approles[item] is not defined
+  changed_when: true
+
+- name: Construct current AppRole credentials dictionary
+  ansible.builtin.set_fact:
+    approle_credentials: >-
+      {%- set dict = {} -%}
+      {%- for r in approle_role_ids.results -%}
+      {%- set service = r.item -%}
+      {%- set role_id = r.stdout -%}
+      {%- if local_approles[service] is defined -%}
+      {%- set secret_id = local_approles[service].secret_id -%}
+      {%- else -%}
+      {%- set secret_id = (approle_new_secret_ids.results | selectattr('item', 'equalto', service) | first).stdout -%}
+      {%- endif -%}
+      {%- set _ = dict.update({service: {'role_id': role_id, 'secret_id': secret_id}}) -%}
+      {%- endfor -%}
+      {{ dict }}
+
+- name: Save updated AppRoles file locally
+  ansible.builtin.copy:
+    content: "{{ approle_credentials | to_nice_json }}"
+    dest: "{{ playbook_dir }}/../runtime/vault/approles.json"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  when: not local_approles_file.stat.exists or (approle_new_secret_ids is defined and approle_new_secret_ids.changed)
+
+- name: Check if database secrets already exist
+  ansible.builtin.command: "vault kv get -format=json secret/platform/databases/{{ item.key }}"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  register: db_secret_check
+  loop: "{{ platform_services | dict2items }}"
+  failed_when: false
+  changed_when: false
+
+- name: Write initial platform service database secrets
+  ansible.builtin.command: "vault kv put secret/platform/databases/{{ item.item.key }} -"
+  args:
+    stdin: "{{ {'username': item.item.value.postgres.username, 'password': item.item.value.postgres.password, 'database': item.item.value.postgres.database, 'host': vault_postgres_host, 'port': vault_postgres_port | string} | to_json }}"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  loop: "{{ db_secret_check.results }}"
+  vars:
+    secret_data: "{{ (item.stdout | from_json).data.data if item.rc == 0 else {} }}"
+  when: >
+    item.rc != 0 or
+    secret_data.username is not defined or secret_data.username != item.item.value.postgres.username or
+    secret_data.password is not defined or secret_data.password != item.item.value.postgres.password or
+    secret_data.database is not defined or secret_data.database != item.item.value.postgres.database or
+    secret_data.host is not defined or secret_data.host != vault_postgres_host or
+    secret_data.port is not defined or secret_data.port | string != vault_postgres_port | string
+
+- name: Check if TLS secret already exists
+  ansible.builtin.command: vault kv get -format=json secret/platform/tls
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  register: tls_secret_check
+  failed_when: false
+  changed_when: false
+
+- name: Read certificate and private key contents
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  register: ssl_slurped_files
+  loop:
+    - "{{ vault_cert_file }}"
+    - "{{ vault_key_file }}"
+
+- name: Write initial TLS secrets to Vault
+  ansible.builtin.command: "vault kv put secret/platform/tls -"
+  args:
+    stdin: "{{ {'ca_cert': ca_cert_val, 'vault_cert': vault_cert_val, 'vault_key': vault_key_val} | to_json }}"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  vars:
+    secret_data: "{{ (tls_secret_check.stdout | from_json).data.data if tls_secret_check.rc == 0 else {} }}"
+    ca_cert_val: "{{ ssl_slurped_files.results[0].content | b64decode }}"
+    vault_cert_val: "{{ ssl_slurped_files.results[0].content | b64decode }}"
+    vault_key_val: "{{ ssl_slurped_files.results[1].content | b64decode }}"
+  when: >
+    tls_secret_check.rc != 0 or
+    secret_data.ca_cert is not defined or (secret_data.ca_cert | replace('\r\n', '\n') | trim) != (ca_cert_val | replace('\r\n', '\n') | trim) or
+    secret_data.vault_cert is not defined or (secret_data.vault_cert | replace('\r\n', '\n') | trim) != (vault_cert_val | replace('\r\n', '\n') | trim) or
+    secret_data.vault_key is not defined or (secret_data.vault_key | replace('\r\n', '\n') | trim) != (vault_key_val | replace('\r\n', '\n') | trim)
+
+- name: Check if Docker registry secret already exists
+  ansible.builtin.command: vault kv get -format=json secret/platform/docker
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  register: docker_secret_check
+  failed_when: false
+  changed_when: false
+
+- name: Write initial Docker registry secrets to Vault
+  ansible.builtin.command: "vault kv put secret/platform/docker -"
+  args:
+    stdin: "{{ {'registry': 'harbor.infra.benden-syslab.com', 'username': 'admin', 'password': 'placeholder_docker_password'} | to_json }}"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  vars:
+    secret_data: "{{ (docker_secret_check.stdout | from_json).data.data if docker_secret_check.rc == 0 else {} }}"
+  when: >
+    docker_secret_check.rc != 0 or
+    secret_data.registry is not defined or secret_data.registry != "harbor.infra.benden-syslab.com" or
+    secret_data.username is not defined or secret_data.username != "admin" or
+    secret_data.password is not defined or secret_data.password != "placeholder_docker_password"
+
+- name: Check if GitHub secret already exists
+  ansible.builtin.command: vault kv get -format=json secret/platform/github
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  register: github_secret_check
+  failed_when: false
+  changed_when: false
+
+- name: Write initial GitHub secrets to Vault
+  ansible.builtin.command: "vault kv put secret/platform/github -"
+  args:
+    stdin: "{{ {'token': 'placeholder_github_token', 'org': 'horus-infra'} | to_json }}"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  vars:
+    secret_data: "{{ (github_secret_check.stdout | from_json).data.data if github_secret_check.rc == 0 else {} }}"
+  when: >
+    github_secret_check.rc != 0 or
+    secret_data.token is not defined or secret_data.token != "placeholder_github_token" or
+    secret_data.org is not defined or secret_data.org != "horus-infra"
+
+- name: "Health Check: Verify Vault HTTP API Health endpoint via URI"
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ vault_api_port }}/v1/sys/health"
+    method: GET
+    validate_certs: false
+    status_code: [200, 429, 472, 473]
+  register: vault_http_health
+  changed_when: false
+
+- name: "Health Check: Assert Vault HTTP API Health"
+  ansible.builtin.assert:
+    that:
+      - vault_http_health.status == 200
+    fail_msg: "Vault HTTP API Health check failed. Status code: {{ vault_http_health.status }}"
+
+- name: "Health Check: Run Vault Operator Diagnose"
+  ansible.builtin.command: "vault operator diagnose -config={{ vault_conf_dir }}/vault.hcl"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+  register: vault_diagnose_result
+  failed_when: false
+  changed_when: false
+  when: vault_enable_diagnostics | default(false) | bool
+
+
+- name: "Health Check: Verify Vault Status"
+  ansible.builtin.command: vault status
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+  changed_when: false
+
+- name: "Health Check: Verify Vault Login"
+  ansible.builtin.command: vault login -no-print "{{ vault_keys.root_token }}"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+  changed_when: false
+
+- name: "Health Check: Verify Vault Token Lookup"
+  ansible.builtin.command: vault token lookup
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  changed_when: false
+
+- name: "Health Check: Verify Vault KV Read"
+  ansible.builtin.command: vault kv get secret/platform/databases/vault
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  changed_when: false
+
+- name: "Health Check: Write Smoke-Test Secret to Internal Namespace"
+  ansible.builtin.command: "vault kv put secret/system/healthcheck status=ok validation_timestamp={{ ansible_date_time.iso8601 }}"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  changed_when: true
+
+- name: "Health Check: Read Smoke-Test Secret"
+  ansible.builtin.command: "vault kv get -format=json secret/system/healthcheck"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  register: smoke_test_secret_raw
+  changed_when: false
+
+- name: "Health Check: Assert Smoke-Test Secret Content"
+  ansible.builtin.assert:
+    that:
+      - smoke_test_secret_raw.stdout is defined
+      - (smoke_test_secret_raw.stdout | from_json).data.data.status == 'ok'
+    fail_msg: "Smoke-test secret write/read verification failed!"
+
+- name: "Health Check: Destroy Smoke-Test Secret Version"
+  ansible.builtin.command: "vault kv destroy -versions=1 secret/system/healthcheck"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  changed_when: true
+
+- name: "Health Check: Delete Smoke-Test Secret Metadata (Clean-up)"
+  ansible.builtin.command: "vault kv metadata delete secret/system/healthcheck"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  changed_when: true
+
+- name: "Health Check: Try AppRole login for jenkins service"
+  ansible.builtin.command: "vault write auth/approle/login role_id={{ approle_credentials.jenkins.role_id }} secret_id={{ approle_credentials.jenkins.secret_id }} -format=json"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+  register: approle_login_result
+  changed_when: false
+
+- name: "Health Check: Verify AppRole login token and policies"
+  ansible.builtin.assert:
+    that:
+      - approle_login_result.stdout is defined
+      - (approle_login_result.stdout | from_json).auth.client_token is defined
+      - "'jenkins-policy' in (approle_login_result.stdout | from_json).auth.policies"
+    fail_msg: "AppRole authentication or policy verification failed!"
+
+- name: "Health Check: Write Temporary AppRole Test Secret"
+  ansible.builtin.command: "vault kv put secret/platform/databases/healthcheck_approle status=ok"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  changed_when: true
+
+- name: "Health Check: Verify Token-based Secret Read using AppRole Token"
+  ansible.builtin.command: "vault kv get -format=json secret/platform/databases/healthcheck_approle"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ (approle_login_result.stdout | from_json).auth.client_token }}"
+  register: approle_read_allowed
+  changed_when: false
+
+- name: "Health Check: Assert successful secret read with AppRole token"
+  ansible.builtin.assert:
+    that:
+      - approle_read_allowed.stdout is defined
+      - (approle_read_allowed.stdout | from_json).data.data.status == 'ok'
+    fail_msg: "Failed to read database secret using AppRole token!"
+
+- name: "Health Check: Destroy Temporary AppRole Test Secret Version"
+  ansible.builtin.command: "vault kv destroy -versions=1 secret/platform/databases/healthcheck_approle"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  changed_when: true
+
+- name: "Health Check: Delete Temporary AppRole Test Secret Metadata (Clean-up)"
+  ansible.builtin.command: "vault kv metadata delete secret/platform/databases/healthcheck_approle"
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_CACERT: "{{ vault_cert_file }}"
+    VAULT_TOKEN: "{{ vault_keys.root_token }}"
+  changed_when: true
+
+- name: "SRE Validation: Fetch Installed Vault Version"
+  ansible.builtin.command: vault version
+  register: installed_vault_version_cmd
+  changed_when: false
+
+- name: "SRE Validation: Parse Installed Vault Version"
+  ansible.builtin.set_fact:
+    vault_installed_version: "{{ (installed_vault_version_cmd.stdout | regex_search('v[0-9]+\\.[0-9]+\\.[0-9]+') | default('v0.0.0')) | replace('v', '') }}"
+
+- name: "Backup Validation: Check local backup artifacts existence"
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../runtime/vault/{{ item }}"
+  register: backup_stats
+  loop:
+    - init.json
+    - recovery.json
+    - approles.json
+  delegate_to: localhost
+  become: false
+
+- name: "Backup Validation: Assert backup files exist"
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+    fail_msg: "Required backup file {{ item.item }} is missing from runtime/vault!"
+  loop: "{{ backup_stats.results }}"
+
+- name: "Backup Validation: Validate local init.json format"
+  ansible.builtin.assert:
+    that:
+      - vault_keys is defined
+      - vault_keys is mapping
+      - "vault_keys.root_token is defined and vault_keys.root_token != ''"
+      - >-
+        ('keys' in vault_keys and vault_keys['keys'] is not none and vault_keys['keys'] | length >= 1) or
+        ('keys_base64' in vault_keys and vault_keys['keys_base64'] is not none and vault_keys['keys_base64'] | length >= 1) or
+        ('unseal_keys_b64' in vault_keys and vault_keys['unseal_keys_b64'] is not none and vault_keys['unseal_keys_b64'] | length >= 1) or
+        ('unseal_keys_hex' in vault_keys and vault_keys['unseal_keys_hex'] is not none and vault_keys['unseal_keys_hex'] | length >= 1) or
+        ('recovery_keys_b64' in vault_keys and vault_keys['recovery_keys_b64'] is not none and vault_keys['recovery_keys_b64'] | length >= 1) or
+        ('recovery_keys_hex' in vault_keys and vault_keys['recovery_keys_hex'] is not none and vault_keys['recovery_keys_hex'] | length >= 1)
+    fail_msg: "Local init.json has invalid keys or root token!"
+
+- name: "Backup Validation: Load and validate recovery.json"
+  ansible.builtin.set_fact:
+    recovery_keys_check: "{{ lookup('file', playbook_dir + '/../runtime/vault/recovery.json') | from_json }}"
+  delegate_to: localhost
+  become: false
+
+- name: "Backup Validation: Assert recovery keys structure"
+  ansible.builtin.assert:
+    that:
+      - recovery_keys_check is defined
+      - recovery_keys_check | length >= 1
+    fail_msg: "Local recovery.json has an invalid format or contains no keys!"
+
+- name: "Backup Validation: Load and validate approles.json"
+  ansible.builtin.set_fact:
+    approles_check: "{{ lookup('file', playbook_dir + '/../runtime/vault/approles.json') | from_json }}"
+  delegate_to: localhost
+  become: false
+
+- name: "Backup Validation: Assert approles has credentials for all expected services"
+  ansible.builtin.assert:
+    that:
+      - approles_check.jenkins is defined and approles_check.jenkins.role_id is defined and approles_check.jenkins.secret_id is defined
+      - approles_check.gitea is defined and approles_check.gitea.role_id is defined and approles_check.gitea.secret_id is defined
+      - approles_check.harbor is defined and approles_check.harbor.role_id is defined and approles_check.harbor.secret_id is defined
+      - approles_check.authentik is defined and approles_check.authentik.role_id is defined and approles_check.authentik.secret_id is defined
+    fail_msg: "Local approles.json is missing required service registrations!"
+
+- name: "TLS Validation: Check if vault.crt is valid for at least 7 days"
+  ansible.builtin.command: "openssl x509 -checkend 604800 -in {{ vault_cert_file }}"
+  register: cert_expiry_check
+  changed_when: false
+  failed_when: false
+
+- name: "TLS Validation: Assert certificate is not expired or near-expiration"
+  ansible.builtin.assert:
+    that:
+      - cert_expiry_check.rc == 0
+    fail_msg: "Vault TLS Certificate has expired or will expire in less than 7 days!"
+
+- name: "TLS Validation: Verify certificate SAN contains 127.0.0.1 or localhost"
+  ansible.builtin.shell: "openssl x509 -in {{ vault_cert_file }} -noout -text | grep -E 'DNS:|IP Address:'"
+  register: cert_san_check
+  changed_when: false
+  failed_when: false
+
+- name: "TLS Validation: Assert certificate contains required SANs"
+  ansible.builtin.assert:
+    that:
+      - cert_san_check.stdout is defined
+      - "'127.0.0.1' in cert_san_check.stdout or 'localhost' in cert_san_check.stdout"
+    fail_msg: "Vault TLS Certificate is missing required SANs (127.0.0.1 or localhost)!"
+
+- name: "Performance Validation: Run write/read benchmark"
+  block:
+    - name: "Performance Validation: Record start timestamp"
+      ansible.builtin.command: "date +%s%3N"
+      register: perf_start_time
+      changed_when: false
+
+    - name: "Performance Validation: Execute 10 sequential KV writes"
+      ansible.builtin.command: "vault kv put secret/system/perf_test run={{ item }} val=speedtest"
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+        VAULT_CACERT: "{{ vault_cert_file }}"
+        VAULT_TOKEN: "{{ vault_keys.root_token }}"
+      loop: "{{ range(1, 11) | list }}"
+      changed_when: true
+
+    - name: "Performance Validation: Execute 10 sequential KV reads"
+      ansible.builtin.command: "vault kv get secret/system/perf_test"
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+        VAULT_CACERT: "{{ vault_cert_file }}"
+        VAULT_TOKEN: "{{ vault_keys.root_token }}"
+      loop: "{{ range(1, 11) | list }}"
+      changed_when: false
+
+    - name: "Performance Validation: Clean up performance test key"
+      ansible.builtin.command: "vault kv metadata delete secret/system/perf_test"
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+        VAULT_CACERT: "{{ vault_cert_file }}"
+        VAULT_TOKEN: "{{ vault_keys.root_token }}"
+      changed_when: true
+
+    - name: "Performance Validation: Record end timestamp"
+      ansible.builtin.command: "date +%s%3N"
+      register: perf_end_time
+      changed_when: false
+
+    - name: "Performance Validation: Calculate average latencies"
+      ansible.builtin.set_fact:
+        vault_perf_total_ms: "{{ (perf_end_time.stdout | int) - (perf_start_time.stdout | int) }}"
+        vault_perf_avg_ms: "{{ ((perf_end_time.stdout | int) - (perf_start_time.stdout | int)) / 20 }}"
+
+    - name: "Performance Validation: Report average latency"
+      ansible.builtin.debug:
+        msg: "Performance test completed: Total time for 20 ops: {{ vault_perf_total_ms }}ms (Avg: {{ vault_perf_avg_ms }}ms/op)"
+  when: vault_enable_perf_test | default(false) | bool
+
+- name: Check if deployment report already exists
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../runtime/results/stage03-vault.txt"
+  register: existing_report_stat
+  delegate_to: localhost
+  become: false
+
+- name: Slurp existing deployment report
+  ansible.builtin.slurp:
+    src: "{{ playbook_dir }}/../runtime/results/stage03-vault.txt"
+  register: existing_report_slurp
+  delegate_to: localhost
+  become: false
+  failed_when: false
+  when: existing_report_stat.stat.exists
+
+- name: Set deployment date fact
+  ansible.builtin.set_fact:
+    vault_deployment_date: >-
+      {%- if existing_report_stat.stat.exists and existing_report_slurp.content is defined -%}
+      {{ ((existing_report_slurp.content | b64decode).split('\n') | select('match', '^Deployment Date:') | first | default('')).replace('Deployment Date:', '') | trim }}
+      {%- else -%}
+      {{ ansible_date_time.iso8601_utc | default(ansible_date_time.iso8601) }}
+      {%- endif -%}
+
+- name: Set previous keys SHA256 fact
+  ansible.builtin.set_fact:
+    existing_vault_keys_sha256: >-
+      {%- if existing_report_stat.stat.exists and existing_report_slurp.content is defined -%}
+      {{ ((existing_report_slurp.content | b64decode).split('\n') | select('match', '^Vault Keys SHA256:') | first | default('')).replace('Vault Keys SHA256:', '') | trim }}
+      {%- else -%}
+      {{ vault_keys_sha256 | default('UNKNOWN') }}
+      {%- endif -%}
+
+- name: WARNING - Vault local keys SHA256 mismatch detected!
+  ansible.builtin.debug:
+    msg: >
+      [WARNING] Local init.json SHA256 checksum ({{ vault_keys_sha256 | default('UNKNOWN') }}) does not match the checksum from the last deployment ({{ existing_vault_keys_sha256 }}).
+      This indicates the keys file may have been replaced or tampered with manually!
+  when: >
+    existing_report_stat.stat.exists and
+    existing_vault_keys_sha256 != "" and
+    existing_vault_keys_sha256 != "UNKNOWN" and
+    (vault_keys_sha256 | default('UNKNOWN')) != existing_vault_keys_sha256
+
+- name: Ensure local results directory exists
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../runtime/results"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+
+- name: Generate deployment report
+  ansible.builtin.template:
+    src: stage03-vault.txt.j2
+    dest: "{{ playbook_dir }}/../runtime/results/stage03-vault.txt"
+    mode: '0600'
+  delegate_to: localhost
+  become: false

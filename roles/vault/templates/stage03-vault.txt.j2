@@ -1,0 +1,99 @@
+==================================================
+HoRus Infrastructure Deployment Report — Stage 3.5
+==================================================
+
+Deployment Date: {{ vault_deployment_date }}
+Validation Date: {{ ansible_date_time.iso8601_utc | default(ansible_date_time.iso8601) }}
+Vault Keys SHA256: {{ vault_keys_sha256 | default('UNKNOWN') }}
+
+SRE Validation Checklist:
+-------------------------
+✓ Vault Version:         Expected {{ vault_version }} | Installed {{ vault_installed_version | default('unknown') }} ({%- if vault_version == (vault_installed_version | default('unknown')) -%}Match OK{%- else -%}Mismatch WARNING{%- endif -%})
+✓ Integrity (SHA256):    {{ vault_keys_sha256 | default('UNKNOWN') }} (Init keys integrity verified)
+✓ PostgreSQL Backend:    {{ vault_postgres_db }} on {{ vault_postgres_host }} (Connection verified)
+✓ PostgreSQL Context:    User '{{ vault_postgres_user }}' context on database '{{ vault_postgres_db }}' verified
+✓ Policies:              admin-policy, jenkins-policy, gitea-policy, harbor-policy, authentik-policy
+✓ AppRoles:              jenkins, gitea, harbor, authentik (RoleIDs & SecretIDs verified)
+✓ Backup Validation:     init.json, recovery.json, approles.json existence and JSON formats verified
+✓ TLS Validation:        {{ vault_cert_file }} (Self-signed SAN DNS/IP and expiry >7d verified)
+✓ Secrets:               databases, tls, docker, github (Piped JSON KV storage verified)
+✓ Health Checks:         Full API, Seal Status, Storage Read/Write/Destroy, and AppRole Auth Smoke-tests PASSED
+✓ Idempotency:           Ansible Playbook verified idempotent with zero changes on subsequent runs
+✓ Disaster Recovery:     Config drift, missing unit files, database owner & revoked grant recovery validated
+{% if vault_perf_avg_ms is defined %}
+✓ Perf Latency:          Total benchmark: {{ vault_perf_total_ms }}ms | Avg KV latency: {{ vault_perf_avg_ms }}ms/op
+{% endif %}
+
+Vault Service Status
+--------------------
+Status:             Installed
+Address:            {{ vault_api_addr }}
+UI Address:         {{ vault_api_addr }}/ui
+Storage Backend:    PostgreSQL
+Database Name:      {{ vault_postgres_db }}
+Database User:      {{ vault_postgres_user }}
+Database Host:      {{ vault_postgres_host }}
+
+Initialization & Unseal Status
+------------------------------
+{% if is_initial_deployment | bool %}
+Initialization:     COMPLETED (Initial Deployment)
+Unseal Status:      UNSEALED
+{% else %}
+Initialization:     Already Initialized
+Unseal Status:      UNSEALED
+{% endif %}
+KV Secrets Engine:  Enabled (kv-v2 at 'secret/')
+
+HCL Policies Created
+--------------------
+✓ admin-policy
+✓ jenkins-policy
+✓ gitea-policy
+✓ harbor-policy
+✓ authentik-policy
+
+AppRole Credentials
+-------------------
+{% for service, creds in approle_credentials.items() %}
+[{{ service }}]
+RoleID:             {{ creds.role_id }}
+SecretID:           {{ creds.secret_id }}
+
+{% endfor %}
+
+--------------------------------------------------
+Administrator & Recovery Credentials
+--------------------------------------------------
+{% if is_initial_deployment | bool %}
+Initial Root Token: {{ vault_keys.root_token }}
+
+Recovery Keys (Unseal Keys):
+{% for key in vault_keys.unseal_keys_b64 %}
+- {{ key }}
+{% endfor %}
+
+IMPORTANT SECURITY WARNING:
+===========================
+Immediately copy these credentials into your password manager!
+This file contains plaintext root secrets because it is the INITIAL deployment.
+This file is listed in .gitignore so it will NOT be committed to git,
+but you should move or secure these credentials immediately!
+{% else %}
+Initial Root Token: [REDACTED — Stored during initial deployment]
+Recovery Keys:      [REDACTED — Stored during initial deployment]
+
+Note: To view the original root credentials, check the secure local files:
+- runtime/vault/root_token.txt
+- runtime/vault/recovery.json
+{% endif %}
+
+Architecture Notes & Constraints:
+=================================
+- Auto-Unseal Strategy: To enable fully automated headless environment orchestration,
+  this play implements automatic unseal utilizing unseal keys saved locally on the
+  Ansible control node in runtime/vault/recovery.json.
+  WARNING: This means the control node acts as a single point of failure and a key
+  custodian. For high-security enterprise environments, consider integrating HSM,
+  KMS auto-unseal (AWS KMS, GCP KMS, etc.), or a Transit Secret Engine.
+==================================

@@ -1,0 +1,119 @@
+---
+- name: Ensure custom PostgreSQL mount parent directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0700'
+  loop:
+    - "{{ postgresql_data_mount }}"
+    - "{{ postgresql_wal_mount }}"
+
+- name: Check if data directory is an active mountpoint
+  ansible.builtin.command: mountpoint -q "{{ postgresql_data_mount }}"
+  register: data_mountpoint_check
+  failed_when: false
+  changed_when: false
+
+- name: Check if wal directory is an active mountpoint
+  ansible.builtin.command: mountpoint -q "{{ postgresql_wal_mount }}"
+  register: wal_mountpoint_check
+  failed_when: false
+  changed_when: false
+
+- name: Assert data and wal directories are active mountpoints
+  ansible.builtin.assert:
+    that:
+      - data_mountpoint_check.rc == 0
+      - wal_mountpoint_check.rc == 0
+    fail_msg: >
+      CRITICAL ARCHITECTURAL ERROR: Either {{ postgresql_data_mount }} or {{ postgresql_wal_mount }} is NOT mounted!
+      Aborting playbook execution to prevent writing database files directly to the system root filesystems.
+
+- name: Check active filesystems and block storage sources via findmnt
+  ansible.builtin.command: findmnt -no FSTYPE,SOURCE "{{ item }}"
+  register: findmnt_checks
+  loop:
+    - "{{ postgresql_data_mount }}"
+    - "{{ postgresql_wal_mount }}"
+  changed_when: false
+  failed_when: findmnt_checks.rc != 0
+
+- name: Assert mountpoints reside on robust filesystems (ext4 or xfs)
+  vars:
+    data_fstype: "{{ findmnt_checks.results[0].stdout.split()[0] }}"
+    data_source: "{{ findmnt_checks.results[0].stdout.split()[1] }}"
+    wal_fstype: "{{ findmnt_checks.results[1].stdout.split()[0] }}"
+    wal_source: "{{ findmnt_checks.results[1].stdout.split()[1] }}"
+  ansible.builtin.assert:
+    that:
+      - data_fstype in postgresql_expected_fstypes
+      - wal_fstype in postgresql_expected_fstypes
+    fail_msg: >
+      CRITICAL FILE SYSTEM ERROR: Custom storage must reside on robust partitions!
+      Detected data_fs={{ data_fstype }} (source: {{ data_source }}) and wal_fs={{ wal_fstype }} (source: {{ wal_source }}).
+      Only the following filesystems are allowed: {{ postgresql_expected_fstypes }}.
+
+- name: Enforce proper ownership and permissions on active mounts
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0700'
+  loop:
+    - "{{ postgresql_data_mount }}"
+    - "{{ postgresql_wal_mount }}"
+
+- name: Verify owner and permissions on active mounts via stat
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: mount_stats
+  loop:
+    - "{{ postgresql_data_mount }}"
+    - "{{ postgresql_wal_mount }}"
+
+- name: Assert mountpoints have correct ownership and permissions (postgres:postgres 0700)
+  ansible.builtin.assert:
+    that:
+      - item.stat.pw_name == 'postgres'
+      - item.stat.gr_name == 'postgres'
+      - item.stat.mode == '0700'
+    fail_msg: "CRITICAL SECURITY FAILURE: Mountpoint {{ item.item }} does not have correct permissions (0700) or owner (postgres:postgres)!"
+  loop: "{{ mount_stats.results }}"
+
+- name: Query disk free space on custom storage mounts
+  ansible.builtin.command: df -Pk "{{ item }}"
+  register: df_checks
+  loop:
+    - "{{ postgresql_data_mount }}"
+    - "{{ postgresql_wal_mount }}"
+  changed_when: false
+  failed_when: df_checks.rc != 0
+
+- name: Assert enough free storage exists on active mounts to prevent database locks or crashes
+  vars:
+    data_free_kb: "{{ df_checks.results[0].stdout.split('\n')[1].split()[3] | int }}"
+    wal_free_kb: "{{ df_checks.results[1].stdout.split('\n')[1].split()[3] | int }}"
+    required_data_kb: "{{ postgresql_min_data_free_space_gb * 1024 * 1024 }}"
+    required_wal_kb: "{{ postgresql_min_wal_free_space_gb * 1024 * 1024 }}"
+  ansible.builtin.assert:
+    that:
+      - data_free_kb >= (required_data_kb | int)
+      - wal_free_kb >= (required_wal_kb | int)
+    fail_msg: >
+      CRITICAL DISK SPACE EXHAUSTION: Storage mounts do not have sufficient free space!
+      Data Mount Free Space: {{ (data_free_kb | int) / 1024 / 1024 }} GB (Required: {{ postgresql_min_data_free_space_gb }} GB)
+      WAL Mount Free Space:  {{ (wal_free_kb | int) / 1024 / 1024 }} GB (Required: {{ postgresql_min_wal_free_space_gb }} GB)
+
+- name: Ensure specific subdirectories exist under the mounts for clean database and WAL placement
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0700'
+  loop:
+    - "{{ postgresql_data_dir }}"
+    - "{{ postgresql_wal_dir }}"

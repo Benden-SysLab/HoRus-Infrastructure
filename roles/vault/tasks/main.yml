@@ -1,0 +1,14 @@
+---
+# roles/vault/tasks/main.yml
+
+- name: Setup PostgreSQL database backend for Vault
+  ansible.builtin.include_tasks: database.yml
+
+- name: Install Vault package and dependencies
+  ansible.builtin.include_tasks: install.yml
+
+- name: Configure and start Vault service
+  ansible.builtin.include_tasks: configure.yml
+
+- name: Initialize, unseal and bootstrap Vault secrets
+  ansible.builtin.include_tasks: initialize.yml

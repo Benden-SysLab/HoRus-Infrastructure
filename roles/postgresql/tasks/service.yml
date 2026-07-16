@@ -9,61 +9,81 @@
     state: started
     enabled: yes
 
-- name: Configure listen_addresses in postgresql.conf
-  ansible.builtin.lineinfile:
-    path: "/etc/postgresql/{{ postgresql_version }}/main/postgresql.conf"
-    regexp: "^#?listen_addresses\\s*="
-    line: "listen_addresses = '{{ postgresql_listen_addresses }}'"
-  register: pg_conf_updated
-
-- name: Configure client authentication in pg_hba.conf
-  ansible.builtin.blockinfile:
-    path: "/etc/postgresql/{{ postgresql_version }}/main/pg_hba.conf"
-    marker: "# {mark} ANSIBLE MANAGED HORUS DB CLUSTER AUTH"
-    block: |
-      host    all             all             127.0.0.1/32            {{ postgresql_auth_method }}
-      host    all             all             ::1/128                 {{ postgresql_auth_method }}
-      host    all             all             {{ postgresql_allowed_subnet }}      {{ postgresql_auth_method }}
-  register: pg_hba_updated
-
-- name: Restart PostgreSQL to apply configuration changes
-  ansible.builtin.systemd:
-    name: "postgresql@{{ postgresql_version }}-main"
-    state: restarted
-  when: pg_conf_updated.changed or pg_hba_updated.changed
-
-- name: Wait for PostgreSQL socket to be ready
+- name: Wait for PostgreSQL local socket to be ready
   ansible.builtin.wait_for:
     path: /var/run/postgresql/.s.PGSQL.5432
     state: present
     timeout: 30
 
-- name: Create database user for Gitea
-  community.postgresql.postgresql_user:
-    name: "{{ db_gitea_user }}"
-    password: "{{ db_gitea_password }}"
-    role_attr_flags: NOSUPERUSER,NOCREATEDB
+- name: Verify PostgreSQL readiness with pg_isready
+  ansible.builtin.command:
+    cmd: "pg_isready"
   become: true
   become_user: postgres
+  register: pg_isready_check
+  changed_when: false
+  failed_when: pg_isready_check.rc != 0
 
-- name: Create database for Gitea
-  community.postgresql.postgresql_db:
-    name: "{{ db_gitea_name }}"
-    owner: "{{ db_gitea_user }}"
+- name: Query PostgreSQL runtime settings in a single efficient call
+  ansible.builtin.command:
+    cmd: >
+      psql -At -F '|' -c "
+      SELECT
+        current_setting('data_directory'),
+        current_setting('config_file'),
+        current_setting('hba_file'),
+        current_setting('port'),
+        current_setting('unix_socket_directories'),
+        current_setting('wal_level'),
+        current_setting('data_checksums', true);
+      "
   become: true
   become_user: postgres
+  register: pg_runtime_settings
+  changed_when: false
 
-- name: Create database user for Authentik
-  community.postgresql.postgresql_user:
-    name: "{{ db_authentik_user }}"
-    password: "{{ db_authentik_password }}"
-    role_attr_flags: NOSUPERUSER,NOCREATEDB
-  become: true
-  become_user: postgres
+- name: Parse and assert PostgreSQL configuration and state
+  vars:
+    settings: "{{ pg_runtime_settings.stdout.split('|') }}"
+    runtime_data_dir: "{{ settings[0] | trim }}"
+    runtime_config_file: "{{ settings[1] | trim }}"
+    runtime_hba_file: "{{ settings[2] | trim }}"
+    runtime_port: "{{ settings[3] | trim }}"
+    runtime_socket_dirs: "{{ settings[4] | trim }}"
+    runtime_wal_level: "{{ settings[5] | trim }}"
+    runtime_data_checksums: "{{ settings[6] | trim }}"
+  ansible.builtin.assert:
+    that:
+      - runtime_data_dir == postgresql_data_dir
+      - runtime_config_file == "/etc/postgresql/" ~ postgresql_version ~ "/main/postgresql.conf"
+      - runtime_hba_file == "/etc/postgresql/" ~ postgresql_version ~ "/main/pg_hba.conf"
+      - runtime_port == '5432'
+      - runtime_socket_dirs == '/var/run/postgresql'
+      - runtime_wal_level in ['replica', 'logical']
+      - runtime_data_checksums == 'on'
+    fail_msg: >
+      CRITICAL VALIDATION FAILURE: PostgreSQL runtime parameters do not match target configurations!
+      Expected: data={{ postgresql_data_dir }}, port=5432, sockets=/var/run/postgresql, checksums=on.
+      Received: data={{ runtime_data_dir }}, config={{ runtime_config_file }}, hba={{ runtime_hba_file }}, port={{ runtime_port }}, sockets={{ runtime_socket_dirs }}, checksums={{ runtime_data_checksums }}.
 
-- name: Create database for Authentik
-  community.postgresql.postgresql_db:
-    name: "{{ db_authentik_name }}"
-    owner: "{{ db_authentik_user }}"
+- name: Query active WAL filename from PostgreSQL database engine
+  ansible.builtin.command:
+    cmd: "psql -At -c \"SELECT pg_walfile_name(pg_current_wal_lsn());\""
   become: true
   become_user: postgres
+  register: db_current_wal_file
+  changed_when: false
+
+- name: Verify that the active WAL segment is physically residing on the dedicated WAL storage directory
+  ansible.builtin.stat:
+    path: "{{ postgresql_wal_dir }}/{{ db_current_wal_file.stdout | trim }}"
+  register: wal_segment_stat
+
+- name: Assert active WAL file is correctly stored on the SSD WAL partition
+  ansible.builtin.assert:
+    that:
+      - wal_segment_stat.stat.exists
+    fail_msg: >
+      CRITICAL WAL STORAGE ALIGNMENT FAILURE: The active WAL segment file ({{ db_current_wal_file.stdout }})
+      is NOT physically present in the dedicated WAL directory ({{ postgresql_wal_dir }})!
+      This indicates that WAL files are being written to the wrong location.

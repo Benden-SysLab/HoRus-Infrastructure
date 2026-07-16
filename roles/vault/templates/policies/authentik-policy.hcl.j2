@@ -1,0 +1,16 @@
+path "secret/data/platform/databases/authentik" {
+  capabilities = ["read"]
+}
+
+path "secret/data/platform/tls" {
+  capabilities = ["read"]
+}
+
+# Future PKI Engine Access for certificate issuance
+path "pki/issue/authentik-cert-role" {
+  capabilities = ["create", "update"]
+}
+
+path "pki/cert/ca" {
+  capabilities = ["read"]
+}

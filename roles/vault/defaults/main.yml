@@ -1,0 +1,43 @@
+---
+# Default variables for vault role
+vault_version: "1.21.4"
+vault_edition: "oss"
+vault_os: "linux"
+vault_arch: "amd64"
+
+vault_suffix: "{{ '+ent' if vault_edition == 'ent' else '' }}"
+vault_release: "{{ vault_version }}{{ vault_suffix }}"
+vault_download_url: "https://releases.hashicorp.com/vault/{{ vault_release }}/vault_{{ vault_release }}_{{ vault_os }}_{{ vault_arch }}.zip"
+vault_checksum_url: "https://releases.hashicorp.com/vault/{{ vault_release }}/vault_{{ vault_release }}_SHA256SUMS"
+
+vault_service_name: "vault"
+vault_service_state: "started"
+vault_service_enabled: true
+
+vault_api_port: 8200
+vault_cluster_port: 8201
+
+vault_api_addr: "https://{{ ansible_host | default('127.0.0.1') }}:{{ vault_api_port }}"
+vault_cluster_addr: "https://{{ ansible_host | default('127.0.0.1') }}:{{ vault_cluster_port }}"
+vault_ui_enabled: true
+
+# Certificates
+vault_cert_dir: "/etc/ssl/horus"
+vault_cert_file: "{{ vault_cert_dir }}/vault.crt"
+vault_key_file: "{{ vault_cert_dir }}/vault.key"
+
+# Storage Backend - PostgreSQL (from Step 3.1)
+vault_postgres_host: "{{ hostvars['horus-db-srv01']['ansible_host'] | default('192.168.1.226') }}"
+vault_postgres_port: 5432
+vault_postgres_db: "vault"
+vault_postgres_user: "vault"
+
+# Repository configuration
+vault_repo_release: "{{ ansible_distribution_release if ansible_distribution_release != 'trixie' else 'bookworm' }}"
+vault_repo_keyring: "/etc/apt/keyrings/hashicorp.asc"
+vault_repo_file: "/etc/apt/sources.list.d/hashicorp.list"
+
+# SRE / SRE Validation
+vault_enable_diagnostics: false
+vault_enable_perf_test: false
+

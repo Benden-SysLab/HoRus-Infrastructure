@@ -1,0 +1,22 @@
+listener "tcp" {
+  address       = "0.0.0.0:{{ vault_api_port }}"
+  tls_disable   = "false"
+  tls_cert_file = "{{ vault_cert_file }}"
+  tls_key_file  = "{{ vault_key_file }}"
+}
+
+storage "postgresql" {
+  connection_url = "postgres://{{ vault_postgres_user }}:{{ vault_postgres_password }}@{{ vault_postgres_host }}:{{ vault_postgres_port }}/{{ vault_postgres_db }}?sslmode=disable"
+}
+
+disable_mlock = {{ vault_disable_mlock | default(true) | lower }}
+
+api_addr     = "{{ vault_api_addr }}"
+cluster_addr = "{{ vault_cluster_addr }}"
+
+telemetry {
+  prometheus_retention_time = "30s"
+  disable_hostname          = true
+}
+
+ui = {{ vault_ui_enabled | lower }}

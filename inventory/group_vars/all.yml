@@ -72,3 +72,25 @@ infra_base_dirs:
   - /srv
   - /data
 
+# Single Source of Truth for Platform Service Databases & Users
+platform_services:
+  vault:
+    postgres:
+      database: "vault"
+      username: "vault"
+      password: "{{ vault_postgres_password }}"
+  gitea:
+    postgres:
+      database: "gitea"
+      username: "gitea"
+      password: "{{ gitea_postgres_password }}"
+  harbor:
+    postgres:
+      database: "harbor"
+      username: "harbor"
+      password: "{{ harbor_postgres_password }}"
+  authentik:
+    postgres:
+      database: "authentik"
+      username: "authentik"
+      password: "{{ authentik_postgres_password }}"

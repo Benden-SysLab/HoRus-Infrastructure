@@ -11,12 +11,23 @@
 {% endfor %}
 
 # ==========================================
+# Dynamic Libraries & Extensions
+# ==========================================
+{% if postgresql_shared_preload_libraries | length > 0 %}
+shared_preload_libraries = '{{ postgresql_shared_preload_libraries | join(",") }}'
+{% endif %}
+
+# ==========================================
 # Debian-specific directory configuration
 # ==========================================
 data_directory = '{{ postgresql_data_dir }}'
 hba_file = '{{ postgresql_conf_dir }}/pg_hba.conf'
 ident_file = '{{ postgresql_conf_dir }}/pg_ident.conf'
+unix_socket_directories = '/var/run/postgresql'
 external_pid_file = '/var/run/postgresql/{{ postgresql_version }}-main.pid'
+
+# Include additional configuration directories
+include_dir = 'conf.d'
 
 # Default system log location
 logging_collector = on

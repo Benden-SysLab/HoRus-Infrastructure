@@ -1,0 +1,184 @@
+---
+# roles/vault/tasks/install.yml
+
+- name: Install required packages
+  ansible.builtin.apt:
+    name:
+      - gnupg
+      - curl
+      - jq
+      - openssl
+      - unzip
+    state: present
+
+- name: Create vault group
+  ansible.builtin.group:
+    name: vault
+    system: yes
+    state: present
+
+- name: Create vault user
+  ansible.builtin.user:
+    name: vault
+    group: vault
+    system: yes
+    shell: /bin/false
+    home: /etc/vault.d
+    create_home: no
+    state: present
+
+- name: Check if Vault binary exists
+  ansible.builtin.stat:
+    path: /usr/bin/vault
+  register: installed_vault_binary_stat
+
+- name: Check currently installed Vault version
+  ansible.builtin.command:
+    cmd: /usr/bin/vault version
+  register: installed_vault_version_cmd
+  changed_when: false
+  failed_when: false
+  when: installed_vault_binary_stat.stat.exists
+
+- name: Validate Vault version exists on HashiCorp releases (Direct)
+  ansible.builtin.uri:
+    url: "{{ vault_checksum_url }}"
+    method: GET
+    status_code: [200, 404]
+    return_content: false
+    timeout: 15
+  register: vault_version_check_direct
+  delegate_to: localhost
+  run_once: true
+  become: false
+  failed_when: false
+  environment:
+    http_proxy: ""
+    https_proxy: ""
+    no_proxy: ""
+  when: not installed_vault_binary_stat.stat.exists or vault_release not in (installed_vault_version_cmd.stdout | default(''))
+
+- name: Validate Vault version exists on HashiCorp releases (With Proxy)
+  ansible.builtin.uri:
+    url: "{{ vault_checksum_url }}"
+    method: GET
+    status_code: [200, 404]
+    return_content: false
+    timeout: 15
+  register: vault_version_check_proxy
+  delegate_to: localhost
+  run_once: true
+  become: false
+  failed_when: false
+  environment: "{{ proxy_env | default(omit) }}"
+  when: >
+    (not installed_vault_binary_stat.stat.exists or vault_release not in (installed_vault_version_cmd.stdout | default(''))) and
+    (vault_version_check_direct is failed or
+     vault_version_check_direct.status is not defined or
+     vault_version_check_direct.status != 200)
+
+- name: Assert Vault version exists on HashiCorp releases
+  ansible.builtin.assert:
+    that:
+      - (vault_version_check_direct is not failed and vault_version_check_direct.status is defined and vault_version_check_direct.status == 200) or
+        (vault_version_check_proxy is defined and vault_version_check_proxy is not skipped and vault_version_check_proxy is not failed and vault_version_check_proxy.status is defined and vault_version_check_proxy.status == 200)
+    fail_msg: >
+      Vault release not found:
+      {{ vault_version }} {{ vault_edition | upper }} does not exist or is blocked.
+      Requested URL: {{ vault_checksum_url }}
+  run_once: true
+  when: not installed_vault_binary_stat.stat.exists or vault_release not in (installed_vault_version_cmd.stdout | default(''))
+
+- name: Download Vault checksum file
+  block:
+    - name: Download Vault checksum file (Direct)
+      ansible.builtin.get_url:
+        url: "{{ vault_checksum_url }}"
+        dest: "/tmp/vault_{{ vault_release }}_SHA256SUMS"
+        mode: '0644'
+        timeout: 15
+      environment:
+        http_proxy: ""
+        https_proxy: ""
+        no_proxy: ""
+  rescue:
+    - name: Download Vault checksum file (With Proxy)
+      ansible.builtin.get_url:
+        url: "{{ vault_checksum_url }}"
+        dest: "/tmp/vault_{{ vault_release }}_SHA256SUMS"
+        mode: '0644'
+        timeout: 30
+      environment: "{{ proxy_env | default(omit) }}"
+  when: not installed_vault_binary_stat.stat.exists or vault_release not in (installed_vault_version_cmd.stdout | default(''))
+
+- name: Extract Vault binary checksum
+  ansible.builtin.shell:
+    cmd: "grep 'vault_{{ vault_release }}_linux_amd64.zip' /tmp/vault_{{ vault_release }}_SHA256SUMS | awk '{print $1}'"
+  register: vault_sha256_hash_check
+  changed_when: false
+  when: not installed_vault_binary_stat.stat.exists or vault_release not in (installed_vault_version_cmd.stdout | default(''))
+
+- name: Set Vault checksum fact
+  ansible.builtin.set_fact:
+    vault_sha256_checksum: "{{ vault_sha256_hash_check.stdout | trim }}"
+  when: not installed_vault_binary_stat.stat.exists or vault_release not in (installed_vault_version_cmd.stdout | default(''))
+
+- name: Download Vault from Official HashiCorp
+  block:
+    - name: Download Vault zip package from Official HashiCorp (Direct)
+      ansible.builtin.get_url:
+        url: "{{ vault_download_url }}"
+        dest: "/tmp/vault_{{ vault_release }}_linux_amd64.zip"
+        checksum: "sha256:{{ vault_sha256_checksum }}"
+        mode: '0644'
+        timeout: 15
+      environment:
+        http_proxy: ""
+        https_proxy: ""
+        no_proxy: ""
+  rescue:
+    - name: Download Vault zip package from Official HashiCorp (With Proxy)
+      ansible.builtin.get_url:
+        url: "{{ vault_download_url }}"
+        dest: "/tmp/vault_{{ vault_release }}_linux_amd64.zip"
+        checksum: "sha256:{{ vault_sha256_checksum }}"
+        mode: '0644'
+        timeout: 30
+      environment: "{{ proxy_env | default(omit) }}"
+  when: not installed_vault_binary_stat.stat.exists or vault_release not in (installed_vault_version_cmd.stdout | default(''))
+
+- name: Unarchive Vault binary to /usr/bin
+  ansible.builtin.unarchive:
+    src: "/tmp/vault_{{ vault_release }}_linux_amd64.zip"
+    dest: /usr/bin/
+    remote_src: yes
+    owner: root
+    group: root
+    mode: '0755'
+  when: not installed_vault_binary_stat.stat.exists or vault_release not in (installed_vault_version_cmd.stdout | default(''))
+
+- name: Ensure correct permissions and ownership on Vault binary
+  ansible.builtin.file:
+    path: /usr/bin/vault
+    owner: root
+    group: root
+    mode: '0755'
+    state: file
+
+- name: Verify that Vault binary exists in /usr/bin
+  ansible.builtin.stat:
+    path: /usr/bin/vault
+  register: vault_binary_stat
+  failed_when: not vault_binary_stat.stat.exists or not vault_binary_stat.stat.executable
+
+- name: Set IPC lock capability on Vault binary
+  ansible.builtin.command:
+    cmd: setcap cap_ipc_lock+ep /usr/bin/vault
+  changed_when: false
+
+- name: Verify Vault installation by running version check
+  ansible.builtin.command:
+    cmd: vault version
+  register: vault_version_output
+  changed_when: false
+  failed_when: vault_version_output.rc != 0

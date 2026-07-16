@@ -19,7 +19,6 @@
     path: "{{ item }}"
     state: absent
   loop:
-    - /etc/apt/sources.list.d/pgdg.list
     - /etc/apt/sources.list.d/postgresql.list
 
 - name: Install PostgreSQL repository key
