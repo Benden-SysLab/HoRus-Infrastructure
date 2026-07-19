@@ -155,8 +155,30 @@ def check_and_harden_passwords(config):
         "vault_postgres_password",
         "gitea_postgres_password",
         "harbor_postgres_password",
-        "authentik_postgres_password"
+        "authentik_postgres_password",
+        "vault_gitea_secret_key",
+        "vault_gitea_internal_token",
+        "vault_gitea_lfs_jwt_secret"
     ]
+
+    # Find keys currently defined in the active vault file
+    existing_keys = set()
+    for line in lines:
+        stripped = line.strip()
+        if ":" in stripped and not stripped.startswith("#"):
+            key = stripped.split(":", 1)[0].strip()
+            existing_keys.add(key)
+
+    # Auto-heal: If any db_keys are missing from the active vault_inventory.yml, append them as placeholders
+    missing_keys = [k for k in db_keys if k not in existing_keys]
+    if missing_keys:
+        print(f"[PREP] Active vault_inventory.yml is missing database/service keys: {missing_keys}")
+        print(f"[PREP] Automatically appending missing keys from template...")
+        lines.append("\n# Added automatically by auto_prepare.py\n")
+        for k in missing_keys:
+            placeholder = f"REPLACE_WITH_{k.upper()}"
+            lines.append(f'{k}: "{placeholder}"\n')
+
     db_plains = {k: None for k in db_keys}
 
     # Fallback: check secrets_plain.txt first
@@ -256,7 +278,11 @@ def check_and_harden_passwords(config):
                         val = val.split("#", 1)[0].strip().strip('"').strip("'")
                     if val in PLACEHOLDERS or "replace_me" in val.lower() or val.startswith("REPLACE_"):
                         print(f"[PREP] Default/Placeholder password detected for {db_key}. Generating secure password...")
-                        db_plains[db_key] = generate_secure_password(24)
+                        if db_key == "vault_gitea_internal_token":
+                            length = 64
+                        else:
+                            length = 32 if any(x in db_key for x in ["key", "token", "secret"]) else 24
+                        db_plains[db_key] = generate_secure_password(length)
                         line = f'{db_key}: "{db_plains[db_key]}"\n'
                     else:
                         db_plains[db_key] = val

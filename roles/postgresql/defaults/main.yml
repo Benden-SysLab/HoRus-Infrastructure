@@ -43,9 +43,11 @@ postgresql_settings:
   wal_buffers: '16MB'
   password_encryption: 'scram-sha-256'
   wal_keep_size: '512MB'
+  pg_stat_statements.max: 10000
+  pg_stat_statements.track: 'all'
 
 # Dynamic Libraries (shared_preload_libraries configuration)
-postgresql_shared_preload_libraries: []
+postgresql_shared_preload_libraries: ['pg_stat_statements']
 
 postgresql_package_state: "present"
 postgresql_listen_addresses: "*"

@@ -1,0 +1,23 @@
+---
+# tasks file for roles/gitea
+
+- name: "Gitea Setup: Install binary and users"
+  ansible.builtin.include_tasks: install.yml
+
+- name: "Gitea Setup: Configure PostgreSQL Database"
+  ansible.builtin.include_tasks: database.yml
+
+- name: "Gitea Setup: Generate app.ini Config File"
+  ansible.builtin.include_tasks: configure.yml
+
+- name: "Gitea Setup: Deploy Systemd unit and start"
+  ansible.builtin.include_tasks: service.yml
+
+- name: "Gitea Setup: Flush handlers to ensure Gitea is restarted if config changed"
+  ansible.builtin.meta: flush_handlers
+
+- name: "Gitea Setup: SRE Smoke Testing & Validation"
+  ansible.builtin.include_tasks: validation.yml
+
+- name: "Gitea Setup: Generate SRE Report"
+  ansible.builtin.include_tasks: report.yml

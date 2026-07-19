@@ -1,0 +1,115 @@
+---
+# roles/gitea/tasks/install.yml
+
+- name: "Install: Ensure prerequisite packages are installed"
+  ansible.builtin.package:
+    name:
+      - git
+      - openssl
+      - curl
+    state: present
+
+- name: "Install: Create git group"
+  ansible.builtin.group:
+    name: "{{ gitea_group }}"
+    system: true
+    state: present
+
+- name: "Install: Create git user"
+  ansible.builtin.user:
+    name: "{{ gitea_user }}"
+    group: "{{ gitea_group }}"
+    home: "{{ gitea_home }}"
+    shell: "/bin/bash"
+    system: true
+    state: present
+
+- name: "Install: Create base directories"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ gitea_user }}"
+    group: "{{ gitea_group }}"
+    mode: '0750'
+  loop:
+    - "{{ gitea_home }}"
+    - "{{ gitea_conf_dir }}"
+    - "{{ gitea_log_dir }}"
+
+- name: "Install: Create data subdirectories"
+  ansible.builtin.file:
+    path: "{{ gitea_home }}/{{ item }}"
+    state: directory
+    owner: "{{ gitea_user }}"
+    group: "{{ gitea_group }}"
+    mode: '0750'
+  loop:
+    - data
+    - custom
+    - indexers
+    - public
+    - gitea-repositories
+
+- name: "Install: Check if Gitea binary exists"
+  ansible.builtin.stat:
+    path: "{{ gitea_bin_path }}"
+  register: gitea_bin_stat
+
+- name: "Install: Get installed Gitea version"
+  ansible.builtin.command: "{{ gitea_bin_path }} --version"
+  register: gitea_installed_version_cmd
+  changed_when: false
+  failed_when: false
+  when: gitea_bin_stat.stat.exists
+
+- name: "Install: Parse installed Gitea version"
+  ansible.builtin.set_fact:
+    gitea_installed_version: "{{ (gitea_installed_version_cmd.stdout | regex_search('([0-9]+\\.[0-9]+\\.[0-9]+)') | default('0.0.0')) }}"
+  when: gitea_bin_stat.stat.exists
+
+- name: "Install: Set update required fact"
+  ansible.builtin.set_fact:
+    gitea_update_required: "{{ not gitea_bin_stat.stat.exists or gitea_installed_version != gitea_version }}"
+
+- name: "Install: Download and verify binary"
+  block:
+    - name: "Install: Download SHA256 checksum file"
+      ansible.builtin.get_url:
+        url: "https://github.com/go-gitea/gitea/releases/download/v{{ gitea_version }}/gitea-{{ gitea_version }}-linux-amd64.sha256"
+        dest: "/tmp/gitea-{{ gitea_version }}.sha256"
+        mode: '0644'
+      environment: "{{ proxy_env }}"
+      register: download_sha256_result
+      until: download_sha256_result is succeeded
+      retries: 3
+      delay: 5
+
+    - name: "Install: Read SHA256 checksum"
+      ansible.builtin.slurp:
+        src: "/tmp/gitea-{{ gitea_version }}.sha256"
+      register: gitea_sha256_slurp
+
+    - name: "Install: Parse SHA256 checksum fact"
+      ansible.builtin.set_fact:
+        gitea_checksum_val: "sha256:{{ (gitea_sha256_slurp.content | b64decode).split()[0] }}"
+
+    - name: "Install: Download Gitea Binary"
+      ansible.builtin.get_url:
+        url: "https://github.com/go-gitea/gitea/releases/download/v{{ gitea_version }}/gitea-{{ gitea_version }}-linux-amd64"
+        dest: "{{ gitea_bin_path }}"
+        mode: '0755'
+        owner: "root"
+        group: "root"
+        checksum: "{{ gitea_checksum_val }}"
+      environment: "{{ proxy_env }}"
+      register: download_gitea_result
+      until: download_gitea_result is succeeded
+      retries: 3
+      delay: 5
+      notify: Restart Gitea service
+
+    - name: "Install: Clean up temp checksum file"
+      ansible.builtin.file:
+        path: "/tmp/gitea-{{ gitea_version }}.sha256"
+        state: absent
+  when: gitea_update_required

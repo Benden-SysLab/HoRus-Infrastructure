@@ -1,0 +1,36 @@
+---
+# roles/gitea/tasks/configure.yml
+
+- name: "Configure: Ensure configuration directory exists"
+  ansible.builtin.file:
+    path: "{{ gitea_conf_dir }}"
+    state: directory
+    owner: "{{ gitea_user }}"
+    group: "{{ gitea_group }}"
+    mode: '0750'
+
+- name: "Configure: Generate pristine Ansible-managed app.ini"
+  ansible.builtin.template:
+    src: app.ini.j2
+    dest: "{{ gitea_conf_dir }}/app.ini.ansible"
+    owner: "{{ gitea_user }}"
+    group: "{{ gitea_group }}"
+    mode: '0600'
+  register: gitea_pristine_config
+
+- name: "Configure: Check if active app.ini exists"
+  ansible.builtin.stat:
+    path: "{{ gitea_conf_dir }}/app.ini"
+  register: gitea_active_config_stat
+
+- name: "Configure: Update active Gitea app.ini"
+  ansible.builtin.copy:
+    src: "{{ gitea_conf_dir }}/app.ini.ansible"
+    dest: "{{ gitea_conf_dir }}/app.ini"
+    remote_src: true
+    owner: "{{ gitea_user }}"
+    group: "{{ gitea_group }}"
+    mode: '0600'
+  when: gitea_pristine_config.changed or not gitea_active_config_stat.stat.exists
+  register: gitea_config_updated
+  notify: Restart Gitea service

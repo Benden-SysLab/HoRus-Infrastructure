@@ -1,0 +1,35 @@
+---
+# roles/gitea/tasks/service.yml
+
+- name: "Service: Create systemd unit file"
+  ansible.builtin.template:
+    src: gitea.service.j2
+    dest: /etc/systemd/system/gitea.service
+    owner: root
+    group: root
+    mode: '0644'
+  register: gitea_service_unit
+  notify: Restart Gitea service
+
+- name: "Service: Force systemd daemon-reload"
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: gitea_service_unit.changed
+
+- name: "Service: Enable and Start Gitea"
+  ansible.builtin.systemd:
+    name: gitea
+    state: started
+    enabled: true
+
+- name: "Service: Verify Service Is Enabled"
+  ansible.builtin.command: "systemctl is-enabled gitea"
+  register: gitea_enabled_status
+  changed_when: false
+  failed_when: gitea_enabled_status.stdout | trim != 'enabled'
+
+- name: "Service: Verify Service Is Active"
+  ansible.builtin.command: "systemctl is-active gitea"
+  register: gitea_active_status
+  changed_when: false
+  failed_when: gitea_active_status.stdout | trim != 'active'

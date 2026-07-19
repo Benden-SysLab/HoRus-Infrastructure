@@ -1,0 +1,24 @@
+[Unit]
+Description=Gitea (Git with a cup of tea)
+After=syslog.target
+After=network.target
+After=postgresql.service
+
+[Service]
+# Limit the number of file descriptors
+LimitNOFILE=524288
+LimitNPROC=524288
+Type=simple
+User={{ gitea_user }}
+Group={{ gitea_group }}
+WorkingDirectory={{ gitea_home }}
+ExecStart={{ gitea_bin_path }} web --config {{ gitea_conf_dir }}/app.ini
+Restart=always
+RestartSec=2s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gitea
+Environment=USER={{ gitea_user }} HOME={{ gitea_home }}
+
+[Install]
+WantedBy=multi-user.target

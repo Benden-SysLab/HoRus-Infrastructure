@@ -1,0 +1,28 @@
+---
+# defaults file for roles/gitea
+
+gitea_version: "1.27.0"
+gitea_user: "git"
+gitea_group: "git"
+gitea_home: "/var/lib/gitea"
+gitea_conf_dir: "/etc/gitea"
+gitea_log_dir: "/var/log/gitea"
+gitea_bin_path: "/usr/local/bin/gitea"
+
+gitea_domain: "git.benden-syslab.com"
+gitea_root_url: "http://git.benden-syslab.com:3000/"  # We can change to http/https as needed. Default is 3000.
+gitea_protocol: "http"
+gitea_http_port: 3000
+gitea_ssh_port: 22
+
+# Database configuration (integrates with PostgreSQL 18 horus-db-srv01)
+gitea_db_host: "192.168.1.226"
+gitea_db_port: 5432
+gitea_db_name: "gitea"
+gitea_db_user: "gitea"
+gitea_db_password: "{{ gitea_postgres_password | default('SecurePasswordGiteaDB123!') }}"
+
+# Security credentials (can be overridden via group_vars/ansible-vault)
+gitea_secret_key: "{{ vault_gitea_secret_key | default('GiteaSecretKey32CharsForHorusPlatformSRE') }}"
+gitea_internal_token: "{{ vault_gitea_internal_token | default('GiteaInternalToken64CharsForHorusPlatformSREInternalSecurityCtx!') }}"
+gitea_lfs_jwt_secret: "{{ vault_gitea_lfs_jwt_secret | default('GiteaLfsJwtSecret32CharsForHorusPlatformSRE') }}"
