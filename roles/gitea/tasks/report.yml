@@ -1,0 +1,18 @@
+---
+# roles/gitea/tasks/report.yml
+
+- name: "Report: Ensure runtime/results directory exists"
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../runtime/results"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+
+- name: "Report: Generate SRE Deployment Report"
+  ansible.builtin.template:
+    src: stage04-gitea.txt.j2
+    dest: "{{ playbook_dir }}/../runtime/results/stage04-gitea.txt"
+    mode: '0644'
+  delegate_to: localhost
+  become: false

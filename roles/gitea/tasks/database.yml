@@ -1,0 +1,84 @@
+---
+# roles/gitea/tasks/database.yml
+
+- name: "Database: Create Gitea PostgreSQL user"
+  community.postgresql.postgresql_user:
+    name: "{{ gitea_db_user }}"
+    password: "{{ gitea_db_password }}"
+    role_attr_flags: "NOSUPERUSER,NOCREATEDB,NOCREATEROLE,NOREPLICATION"
+    login_unix_socket: /var/run/postgresql
+  delegate_to: horus-db-srv01
+  become: true
+  become_user: postgres
+  no_log: true
+
+- name: "Database: Create Gitea PostgreSQL database"
+  community.postgresql.postgresql_db:
+    name: "{{ gitea_db_name }}"
+    owner: "{{ gitea_db_user }}"
+    login_unix_socket: /var/run/postgresql
+  delegate_to: horus-db-srv01
+  become: true
+  become_user: postgres
+
+- name: "Database: Revoke public CONNECT privilege on Gitea database"
+  community.postgresql.postgresql_privs:
+    database: "{{ gitea_db_name }}"
+    role: PUBLIC
+    type: database
+    privs: CONNECT
+    state: absent
+    login_unix_socket: /var/run/postgresql
+  delegate_to: horus-db-srv01
+  become: true
+  become_user: postgres
+
+- name: "Database: Grant CONNECT privilege on Gitea database to Gitea user"
+  community.postgresql.postgresql_privs:
+    database: "{{ gitea_db_name }}"
+    role: "{{ gitea_db_user }}"
+    type: database
+    privs: CONNECT
+    state: present
+    login_unix_socket: /var/run/postgresql
+  delegate_to: horus-db-srv01
+  become: true
+  become_user: postgres
+
+- name: "Database: Grant ALL privileges on Gitea database to Gitea user"
+  community.postgresql.postgresql_privs:
+    database: "{{ gitea_db_name }}"
+    role: "{{ gitea_db_user }}"
+    type: database
+    privs: ALL
+    state: present
+    login_unix_socket: /var/run/postgresql
+  delegate_to: horus-db-srv01
+  become: true
+  become_user: postgres
+
+- name: "Database: Verify Gitea database connection and context"
+  ansible.builtin.command:
+    argv:
+      - psql
+      - -h
+      - 127.0.0.1
+      - -U
+      - "{{ gitea_db_user }}"
+      - -d
+      - "{{ gitea_db_name }}"
+      - -t
+      - -A
+      - -c
+      - "SELECT current_user, current_database();"
+  environment:
+    PGPASSWORD: "{{ gitea_db_password }}"
+  delegate_to: horus-db-srv01
+  changed_when: false
+  register: gitea_db_conn_check
+  failed_when: >
+    gitea_db_conn_check.rc != 0 or
+    (gitea_db_user + '|' + gitea_db_name) not in gitea_db_conn_check.stdout
+  no_log: true
+  become: true
+  become_user: postgres

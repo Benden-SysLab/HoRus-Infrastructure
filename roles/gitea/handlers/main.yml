@@ -1,0 +1,7 @@
+---
+# handlers file for roles/gitea
+
+- name: Restart Gitea service
+  ansible.builtin.systemd:
+    name: gitea
+    state: restarted

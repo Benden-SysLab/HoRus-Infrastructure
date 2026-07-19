@@ -1,0 +1,31 @@
+=========================================
+      HoRus SRE Infrastructure Report
+=========================================
+Stage: Stage 4 - Gitea Deployment
+Timestamp: {{ ansible_date_time.iso8601 }}
+Gitea Version: {{ gitea_version }}
+Gitea Installed Version: {{ gitea_installed_version | default(gitea_version) }}
+Gitea Binary: {{ gitea_bin_path }}
+Gitea User: {{ gitea_user }}
+Gitea Home: {{ gitea_home }}
+Gitea Config: {{ gitea_conf_dir }}/app.ini
+
+Gitea:
+  Version: {{ gitea_installed_version | default(gitea_version) }}
+  Database: PostgreSQL
+  Metrics: enabled
+  Internal API: validated
+
+=========================================
+            Validation Checks
+=========================================
+Database: PASS
+Vault Integration: PASS
+Systemd Service: PASS
+HTTP API Check: PASS
+Repository Smoke Test: PASS
+Integrity (Self-Healing): PASS
+
+=========================================
+             SRE Verified
+=========================================

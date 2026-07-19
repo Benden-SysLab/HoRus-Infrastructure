@@ -1,0 +1,58 @@
+# /etc/gitea/app.ini
+# Managed by Ansible - SRE HoRus Infrastructure
+
+[DEFAULT]
+WORK_PATH = {{ gitea_home }}
+
+APP_NAME = HoRus Git Platform
+RUN_MODE = prod
+RUN_USER = {{ gitea_user }}
+
+[database]
+DB_TYPE  = postgres
+HOST     = {{ gitea_db_host }}:{{ gitea_db_port }}
+NAME     = {{ gitea_db_name }}
+USER     = {{ gitea_db_user }}
+PASSWD   = {{ gitea_db_password }}
+SCHEMA   = public
+SSL_MODE = disable
+
+[repository]
+ROOT = {{ gitea_home }}/gitea-repositories
+
+[server]
+APP_DATA_PATH    = {{ gitea_home }}/data
+DOMAIN           = {{ gitea_domain }}
+HTTP_ADDR        = 0.0.0.0
+HTTP_PORT        = {{ gitea_http_port }}
+PROTOCOL         = {{ gitea_protocol }}
+ROOT_URL         = {{ gitea_root_url }}
+LOCAL_ROOT_URL   = http://127.0.0.1:{{ gitea_http_port }}/
+DISABLE_SSH      = false
+SSH_PORT         = {{ gitea_ssh_port }}
+SSH_LISTEN_PORT  = {{ gitea_ssh_port }}
+LFS_START_SERVER = true
+LFS_JWT_SECRET   = {{ gitea_lfs_jwt_secret }}
+
+[security]
+INSTALL_LOCK   = true
+SECRET_KEY     = {{ gitea_secret_key }}
+INTERNAL_TOKEN = {{ gitea_internal_token }}
+
+[service]
+DISABLE_REGISTRATION = true
+REQUIRE_SIGNIN_VIEW  = true
+
+[log]
+MODE      = console, file
+LEVEL     = info
+ROOT_PATH = {{ gitea_log_dir }}
+
+[metrics]
+ENABLED = true
+
+# Placeholder for future Authentik OAuth2 Integration (Stage 4.5 / 5)
+# [oauth2_client]
+# REGISTER_EMAIL_CONFIRM = false
+# ENABLE_AUTO_REGISTRATION = true
+# USERNAME_FROM_EMAIL = true

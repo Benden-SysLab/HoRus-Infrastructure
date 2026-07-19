@@ -31,3 +31,9 @@ vault_postgres_password: "REPLACE_WITH_VAULT_POSTGRES_PASSWORD"
 gitea_postgres_password: "REPLACE_WITH_GITEA_POSTGRES_PASSWORD"
 harbor_postgres_password: "REPLACE_WITH_HARBOR_POSTGRES_PASSWORD"
 authentik_postgres_password: "REPLACE_WITH_AUTHENTIK_POSTGRES_PASSWORD"
+
+# Gitea Internal Secrets
+vault_gitea_secret_key: "REPLACE_WITH_GITEA_SECRET_KEY_MIN_32_CHARS"
+vault_gitea_internal_token: "REPLACE_WITH_GITEA_INTERNAL_TOKEN_MIN_32_CHARS"
+vault_gitea_lfs_jwt_secret: "REPLACE_WITH_GITEA_LFS_JWT_SECRET_MIN_32_CHARS"
+

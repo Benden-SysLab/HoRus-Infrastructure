@@ -1,0 +1,284 @@
+---
+# roles/gitea/tasks/validation.yml
+
+- name: "Validation: Verify Gitea environment"
+  block:
+    - name: "Validation: Verify Gitea binary exists"
+      ansible.builtin.stat:
+        path: "{{ gitea_bin_path }}"
+      register: gitea_bin_check
+      failed_when: not gitea_bin_check.stat.exists
+
+    - name: "Validation: Verify Gitea configuration file exists"
+      ansible.builtin.stat:
+        path: "{{ gitea_conf_dir }}/app.ini"
+      register: gitea_ini_check
+      failed_when: not gitea_ini_check.stat.exists
+
+    - name: "Validation: Verify directories exist"
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: dir_check
+      loop:
+        - "{{ gitea_home }}"
+        - "{{ gitea_conf_dir }}"
+        - "{{ gitea_log_dir }}"
+      failed_when: not dir_check.stat.exists
+
+    - name: "Validation: Check Gitea systemd service status"
+      ansible.builtin.systemd:
+        name: gitea
+      register: gitea_service_status
+
+    - name: "Validation: Get Gitea systemd main PID"
+      ansible.builtin.command:
+        cmd: systemctl show gitea --property=MainPID --value
+      register: gitea_main_pid
+      changed_when: false
+
+    - name: "Validation: Validate Gitea main process"
+      ansible.builtin.assert:
+        that:
+          - gitea_main_pid.stdout | int > 0
+        fail_msg: "Gitea service is active but systemd has no MainPID!"
+
+    - name: "Validation: Detect unmanaged Gitea processes"
+      ansible.builtin.shell: |
+        pgrep -af "[/]usr/local/bin/gitea web" | grep -v "$(systemctl show gitea -p MainPID --value)" || true
+      register: unmanaged_gitea
+      changed_when: false
+
+    - name: "Validation: Warn on unmanaged Gitea processes"
+      ansible.builtin.debug:
+        msg:
+          - "WARNING: unmanaged/orphan Gitea process detected!"
+          - "{{ unmanaged_gitea.stdout }}"
+      when: unmanaged_gitea.stdout != ""
+
+    - name: "Validation: Assert Gitea service is active"
+      ansible.builtin.assert:
+        that:
+          - gitea_service_status.status.ActiveState == 'active'
+        fail_msg: "Gitea systemd service is NOT in active state!"
+  rescue:
+    - name: "Validation: Run diagnostic collection on pre-check failure"
+      block:
+        - name: "Validation: Collect Gitea journalctl logs"
+          ansible.builtin.command: "journalctl -u gitea -n 100 --no-pager"
+          register: gitea_journalctl
+          changed_when: false
+          failed_when: false
+
+        - name: "Validation: Check PostgreSQL server availability"
+          ansible.builtin.command: "pg_isready -h {{ gitea_db_host }} -p {{ gitea_db_port }}"
+          register: postgres_is_ready
+          changed_when: false
+          failed_when: false
+
+        - name: "Validation: Run Gitea Doctor check"
+          ansible.builtin.command: "{{ gitea_bin_path }} doctor check --config {{ gitea_conf_dir }}/app.ini"
+          register: gitea_doctor
+          changed_when: false
+          failed_when: false
+          become: true
+          become_user: "{{ gitea_user }}"
+
+        - name: "Validation: Show App.ini properties"
+          ansible.builtin.shell: |
+            grep -E "^(HOST|NAME|USER|HTTP_PORT|ROOT_URL|DOMAIN)" {{ gitea_conf_dir }}/app.ini
+          register: gitea_ini_grep
+          changed_when: false
+          failed_when: false
+
+        - name: "Validation: Fail with comprehensive diagnostic details"
+          ansible.builtin.fail:
+            msg: |
+              ================================================================================
+              SRE COMPREHENSIVE GITEA DIAGNOSTIC REPORT (PRE-CHECK FAILURE)
+              ================================================================================
+              Service state: {{ gitea_service_status.status.ActiveState | default('Unknown') }}
+              PostgreSQL availability: {{ postgres_is_ready.stdout | default('Unknown') | trim }}
+
+              GITEA CONFIG DIGEST (app.ini):
+              {{ gitea_ini_grep.stdout | default('Unable to read app.ini') | trim }}
+
+              GITEA DOCTOR OUTPUT:
+              {{ gitea_doctor.stdout | default('Doctor check failed to run') | trim }}
+              {{ gitea_doctor.stderr | default('') | trim }}
+
+              GITEA JOURNALCTL LOGS (Last 100 lines):
+              {{ gitea_journalctl.stdout | default('No journalctl logs found') | trim }}
+              ================================================================================
+
+- name: "Validation: Wait for Gitea to start listening (Up to 120 seconds)"
+  ansible.builtin.wait_for:
+    port: "{{ gitea_http_port }}"
+    host: "127.0.0.1"
+    timeout: 120
+  register: wait_for_result
+  ignore_errors: true
+
+- name: "Validation: SRE Port Failure Diagnostics"
+  block:
+    - name: "Validation: Diagnostics: Collect Gitea journalctl logs for port timeout"
+      ansible.builtin.command: "journalctl -u gitea -n 100 --no-pager"
+      register: gitea_port_journalctl
+      changed_when: false
+      failed_when: false
+
+    - name: "Validation: Diagnostics: Collect netstat/ss output for port 3000"
+      ansible.builtin.command: "ss -tlnp"
+      register: ss_output
+      changed_when: false
+      failed_when: false
+
+    - name: "Validation: Diagnostics: Run Gitea Doctor check (Port Timeout)"
+      ansible.builtin.command: "{{ gitea_bin_path }} doctor check --config {{ gitea_conf_dir }}/app.ini"
+      register: gitea_doctor_port
+      changed_when: false
+      failed_when: false
+      become: true
+      become_user: "{{ gitea_user }}"
+
+    - name: "Validation: Diagnostics: Fail with port timeout diagnostic details"
+      ansible.builtin.fail:
+        msg: |
+          ================================================================================
+          SRE PORT TIMEOUT DIAGNOSTIC REPORT
+          ================================================================================
+          Timeout occurred when waiting for 127.0.0.1:{{ gitea_http_port }}.
+
+          ACTIVE LISTENERS:
+          {{ ss_output.stdout | default('ss command failed') | trim }}
+
+          GITEA DOCTOR OUTPUT:
+          {{ gitea_doctor_port.stdout | default('Doctor check failed to run') | trim }}
+          {{ gitea_doctor_port.stderr | default('') | trim }}
+
+          GITEA JOURNALCTL LOGS (Last 100 lines):
+          {{ gitea_port_journalctl.stdout | default('No journalctl logs found') | trim }}
+          ================================================================================
+  when: wait_for_result.failed | default(false)
+
+- name: "Validation: Read Gitea app.ini for token assertion"
+  ansible.builtin.slurp:
+    src: "{{ gitea_conf_dir }}/app.ini"
+  register: gitea_app_ini
+  changed_when: false
+
+- name: "Validation: Extract INTERNAL_TOKEN from app.ini"
+  ansible.builtin.set_fact:
+    gitea_internal_token_extracted: "{{ token_match[0] | default('') }}"
+  vars:
+    token_match: >-
+      {{
+        gitea_app_ini.content
+        | b64decode
+        | regex_findall('(?m)^INTERNAL_TOKEN\s*=\s*(\S+)')
+      }}
+  changed_when: false
+
+- name: "Validation: Validate Gitea internal token exists and meets security length requirement (>=64 chars)"
+  ansible.builtin.assert:
+    that:
+      - gitea_internal_token_extracted is defined
+      - gitea_internal_token_extracted | length >= 64
+      - gitea_internal_token_extracted == gitea_internal_token
+    fail_msg: "Gitea INTERNAL_TOKEN validation failed. The token is either missing, less than 64 characters, or out of sync with the Ansible-provisioned configuration."
+
+- name: "Validation: Check Gitea Login Page (Authentication Required Mode)"
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ gitea_http_port }}/user/login"
+    method: GET
+    status_code: 200
+    return_content: true
+  register: gitea_web_check
+
+- name: "Validation: Assert Gitea Web Page responded and is valid"
+  ansible.builtin.assert:
+    that:
+      - "'gitea' in gitea_web_check.content | lower or 'sign in' in gitea_web_check.content | lower"
+    fail_msg: "Gitea login page response content validation failed! Page does not appear to serve Gitea correctly."
+
+- name: "Validation: Check Gitea Prometheus metrics endpoint"
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ gitea_http_port }}/metrics"
+    method: GET
+    status_code: 200
+    return_content: true
+  register: gitea_metrics_check
+  changed_when: false
+
+- name: "Validation: Assert Gitea metrics contain native prometheus prefixes"
+  ansible.builtin.assert:
+    that:
+      - "'gitea_' in gitea_metrics_check.content"
+    fail_msg: "Gitea metrics endpoint is accessible but does not contain valid 'gitea_' telemetry metrics."
+
+- name: "Validation: Check if SRE validation user exists"
+  ansible.builtin.command: "{{ gitea_bin_path }} admin user list --config {{ gitea_conf_dir }}/app.ini"
+  register: gitea_user_list
+  changed_when: false
+  become: true
+  become_user: "{{ gitea_user }}"
+
+- name: "Validation: Create SRE validation user"
+  ansible.builtin.command: "{{ gitea_bin_path }} admin user create --username horus-sre --password SecurePasswordSRE123! --email sre@benden-syslab.com --admin --config {{ gitea_conf_dir }}/app.ini"
+  when: "'horus-sre' not in gitea_user_list.stdout"
+  changed_when: true
+  become: true
+  become_user: "{{ gitea_user }}"
+
+- name: "Validation: Create temporary test repository via API"
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ gitea_http_port }}/api/v1/user/repos"
+    method: POST
+    user: "horus-sre"
+    password: "SecurePasswordSRE123!"
+    force_basic_auth: true
+    body_format: json
+    body:
+      name: "health-check-test"
+      private: true
+      auto_init: true
+    status_code: [201, 409] # 409 if repository already exists
+  register: gitea_create_repo_result
+
+- name: "Validation: Clone, Commit, Push Smoke Test"
+  block:
+    - name: "Validation: Clone the test repository"
+      ansible.builtin.shell: |
+        set -e
+        rm -rf /tmp/gitea-smoke-test
+        git clone http://horus-sre:SecurePasswordSRE123!@127.0.0.1:{{ gitea_http_port }}/horus-sre/health-check-test.git /tmp/gitea-smoke-test
+      changed_when: false
+      no_log: true
+
+    - name: "Validation: Make a test commit and push"
+      ansible.builtin.shell: |
+        set -e
+        cd /tmp/gitea-smoke-test
+        git config user.name "Horus SRE"
+        git config user.email "sre@benden-syslab.com"
+        echo "SRE Validation Success: {{ ansible_date_time.iso8601 }}" >> validation.log
+        git add validation.log
+        git commit -m "SRE validation commit"
+        git push origin main
+      changed_when: true
+      no_log: true
+  always:
+    - name: "Validation: Delete temporary test repository via API"
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ gitea_http_port }}/api/v1/repos/horus-sre/health-check-test"
+        method: DELETE
+        user: "horus-sre"
+        password: "SecurePasswordSRE123!"
+        force_basic_auth: true
+        status_code: [204, 404]
+      register: gitea_delete_repo_result
+      failed_when: false
+
+    - name: "Validation: Clean up local smoke test folder"
+      ansible.builtin.file:
+        path: "/tmp/gitea-smoke-test"
+        state: absent

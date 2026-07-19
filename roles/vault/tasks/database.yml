@@ -194,3 +194,5 @@
       - db_role_connection_check.query_result[0].current_user == vault_postgres_user
       - db_role_connection_check.query_result[0].current_database == vault_postgres_db
     fail_msg: "Database connection check under role {{ vault_postgres_user }} failed!"
+
+

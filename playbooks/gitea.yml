@@ -1,0 +1,9 @@
+---
+- name: "Stage 4 — Gitea Enterprise Deployment and Integration"
+  hosts: gitea
+  become: true
+  gather_facts: true
+  vars_files:
+    - "{{ playbook_dir }}/../inventory/group_vars/vault_inventory.yml"
+  roles:
+    - gitea
